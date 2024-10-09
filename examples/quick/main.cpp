@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (C) 2022 by wangwenx190 (Yuhang Zhao)
+ * Copyright (C) 2021-2023 by wangwenx190 (Yuhang Zhao)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,22 +22,51 @@
  * SOFTWARE.
  */
 
+#ifndef QMLTC_ENABLED
+#  define QMLTC_ENABLED 0
+#endif
+
 #include <QtGui/qguiapplication.h>
 #include <QtQml/qqmlapplicationengine.h>
+#include <QtQml/qqmlcontext.h>
 #include <QtQuick/qquickwindow.h>
-#include <QtQuickControls2/qquickstyle.h>
-#include <framelessquickmodule.h>
-#include "settings.h"
+#include <FramelessHelper/Quick/framelessquickmodule.h>
+#include <FramelessHelper/Core/private/framelessconfig_p.h>
+#include "quicksettings.h"
+#if QMLTC_ENABLED
+#  include <homepage.h>
+#endif
+#include "../shared/log.h"
+
+FRAMELESSHELPER_REQUIRE_CONFIG(window)
 
 FRAMELESSHELPER_USE_NAMESPACE
 
+static constexpr const bool IS_MACOS_HOST =
+#ifdef Q_OS_MACOS
+        true
+#else // !Q_OS_MACOS
+        false
+#endif // Q_OS_MACOS
+        ;
+
 int main(int argc, char *argv[])
 {
+    Log::setup(FRAMELESSHELPER_STRING_LITERAL("quick"));
+
     // Not necessary, but better call this function, before the construction
     // of any Q(Core|Gui)Application instances.
-    FramelessHelper::Core::initialize();
+    FramelessHelperQuickInitialize();
 
-    QGuiApplication application(argc, argv);
+    const auto application = std::make_unique<QGuiApplication>(argc, argv);
+
+    // Must be called after QGuiApplication has been constructed, we are using
+    // some private functions from QPA which won't be available until there's
+    // a QGuiApplication instance.
+    FramelessHelperEnableThemeAware();
+
+    FramelessConfig::instance()->set(Global::Option::EnableBlurBehindWindow);
+    //FramelessConfig::instance()->set(Global::Option::DisableLazyInitializationForMicaMaterial);
 
     // Enable QtRHI debug output if not explicitly requested by the user.
     if (!qEnvironmentVariableIsSet("QSG_INFO")) {
@@ -59,31 +88,57 @@ int main(int argc, char *argv[])
 #endif
     }
 
-    QQmlApplicationEngine engine;
+    if (!qEnvironmentVariableIsSet("QT_QUICK_CONTROLS_STYLE")) {
+        // This line is not relevant to FramelessHelper, we change the default
+        // Qt Quick Controls theme to "Basic" (Qt6) or "Default" (Qt5) just
+        // because other themes will make our homemade system buttons look
+        // not good. This line has nothing to do with FramelessHelper itself.
+        qputenv("QT_QUICK_CONTROLS_STYLE", []() -> QByteArray {
+#if (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
+            return FRAMELESSHELPER_BYTEARRAY_LITERAL("Basic");
+#else
+            return FRAMELESSHELPER_BYTEARRAY_LITERAL("Default");
+#endif
+        }());
+    }
 
+#if 0
+    // Enable some helpful debugging messages.
+    if (!qEnvironmentVariableIsSet("QML_IMPORT_TRACE")) {
+        qputenv("QML_IMPORT_TRACE", FRAMELESSHELPER_BYTEARRAY_LITERAL("1"));
+    }
+#endif
+
+    const auto engine = std::make_unique<QQmlApplicationEngine>();
+
+    engine->rootContext()->setContextProperty(
+        FRAMELESSHELPER_STRING_LITERAL("$isMacOSHost"), QVariant(IS_MACOS_HOST));
+
+#if (((QT_VERSION < QT_VERSION_CHECK(6, 2, 0)) || defined(QUICK_USE_QMAKE)) && !QMLTC_ENABLED)
     // Don't forget to register our own custom QML types!
-    FramelessHelper::Quick::registerTypes(&engine);
+    FramelessHelperQuickRegisterTypes(engine.get());
 
-    qmlRegisterSingletonType<Settings>("Demo", 1, 0, "Settings",
+    qmlRegisterSingletonType<QuickSettings>("Demo", 1, 0, "Settings",
         [](QQmlEngine *engine, QJSEngine *scriptEngine) -> QObject * {
             Q_UNUSED(engine);
             Q_UNUSED(scriptEngine);
-            return new Settings;
+            return new QuickSettings;
         });
-
-    // This line is not relevant to FramelessHelper, we change the default
-    // Qt Quick Controls theme to "Basic" (Qt6) or "Default" (Qt5) just
-    // because other themes will make our homemade system buttons look
-    // not good. This line has nothing to do with FramelessHelper itself.
-#if (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
-    QQuickStyle::setStyle(FRAMELESSHELPER_STRING_LITERAL("Basic"));
-#else
-    QQuickStyle::setStyle(FRAMELESSHELPER_STRING_LITERAL("Default"));
 #endif
 
-    const QUrl mainUrl(FRAMELESSHELPER_STRING_LITERAL("qrc:///Demo/qml/MainWindow.qml"));
+#if !QMLTC_ENABLED
+    const QUrl mainUrl(FRAMELESSHELPER_STRING_LITERAL("qrc:///qml/HomePage.qml"));
+#endif
+
+#if (QT_VERSION >= QT_VERSION_CHECK(6, 4, 0))
+    QObject::connect(engine.get(), &QQmlApplicationEngine::objectCreationFailed, application.get(),
+        [](const QUrl &url){
+            qCritical() << "The QML engine failed to create component:" << url;
+            QCoreApplication::exit(-1);
+        }, Qt::QueuedConnection);
+#elif !QMLTC_ENABLED
     const QMetaObject::Connection connection = QObject::connect(
-        &engine, &QQmlApplicationEngine::objectCreated, &application,
+        engine.get(), &QQmlApplicationEngine::objectCreated, application.get(),
         [&mainUrl, &connection](QObject *object, const QUrl &url) {
             if (url != mainUrl) {
                 return;
@@ -94,8 +149,16 @@ int main(int argc, char *argv[])
                 QCoreApplication::exit(-1);
             }
         }, Qt::QueuedConnection);
+#endif
 
-    engine.load(mainUrl);
+#if !QMLTC_ENABLED
+    engine->load(mainUrl);
+#endif
+
+#if QMLTC_ENABLED
+    const auto homePage = std::make_unique<HomePage>(engine.get());
+    homePage->show();
+#endif
 
     return QCoreApplication::exec();
 }

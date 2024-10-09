@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (C) 2022 by wangwenx190 (Yuhang Zhao)
+ * Copyright (C) 2021-2023 by wangwenx190 (Yuhang Zhao)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,26 +24,28 @@
 
 #pragma once
 
-#include "framelesshelpercore_global.h"
-#include <QtCore/qobject.h>
+#include <FramelessHelper/Core/framelesshelpercore_global.h>
 
 FRAMELESSHELPER_BEGIN_NAMESPACE
 
 class FRAMELESSHELPER_CORE_API FramelessConfig : public QObject
 {
-    Q_OBJECT
-    Q_DISABLE_COPY_MOVE(FramelessConfig)
+    FRAMELESSHELPER_QT_CLASS(FramelessConfig)
 
 public:
-    explicit FramelessConfig(QObject *parent = nullptr);
-    ~FramelessConfig() override;
-
     Q_NODISCARD static FramelessConfig *instance();
 
     void reload(const bool force = false);
 
     void set(const Global::Option option, const bool on = true);
     Q_NODISCARD bool isSet(const Global::Option option) const;
+
+    static void setLoadFromEnvironmentVariablesDisabled(const bool on = true);
+    static void setLoadFromConfigurationFileDisabled(const bool on = true);
+
+private:
+    explicit FramelessConfig(QObject *parent = nullptr);
+    ~FramelessConfig() override;
 };
 
 FRAMELESSHELPER_END_NAMESPACE

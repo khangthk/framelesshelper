@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (C) 2022 by wangwenx190 (Yuhang Zhao)
+ * Copyright (C) 2021-2023 by wangwenx190 (Yuhang Zhao)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,62 +24,33 @@
 
 #pragma once
 
-#include "framelesshelperquick_global.h"
-#if (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
-#include <QtCore/qobject.h>
-#include <QtQuick/qquickwindow.h>
-#include <QtQuick/private/qquickanchors_p_p.h>
+#include <FramelessHelper/Quick/framelesshelperquick_global.h>
 
-QT_BEGIN_NAMESPACE
-class QQuickRectangle;
-QT_END_NAMESPACE
+#if (FRAMELESSHELPER_CONFIG(private_qt) && FRAMELESSHELPER_CONFIG(window))
+
+#include <QtQuick/qquickwindow.h>
 
 FRAMELESSHELPER_BEGIN_NAMESPACE
 
-class FramelessQuickWindow;
+#if FRAMELESSHELPER_CONFIG(border_painter)
+class QuickWindowBorder;
+#endif
 
+class FramelessQuickWindow;
 class FRAMELESSHELPER_QUICK_API FramelessQuickWindowPrivate : public QObject
 {
-    Q_OBJECT
-    Q_DECLARE_PUBLIC(FramelessQuickWindow)
-    Q_DISABLE_COPY_MOVE(FramelessQuickWindowPrivate)
+    FRAMELESSHELPER_PRIVATE_QT_CLASS(FramelessQuickWindow)
 
 public:
     explicit FramelessQuickWindowPrivate(FramelessQuickWindow *q);
     ~FramelessQuickWindowPrivate() override;
 
-    Q_NODISCARD static FramelessQuickWindowPrivate *get(FramelessQuickWindow *pub);
-    Q_NODISCARD static const FramelessQuickWindowPrivate *get(const FramelessQuickWindow *pub);
-
-    Q_INVOKABLE Q_NODISCARD bool isHidden() const;
-    Q_INVOKABLE Q_NODISCARD bool isNormal() const;
-    Q_INVOKABLE Q_NODISCARD bool isMinimized() const;
-    Q_INVOKABLE Q_NODISCARD bool isMaximized() const;
-    Q_INVOKABLE Q_NODISCARD bool isZoomed() const;
-    Q_INVOKABLE Q_NODISCARD bool isFullScreen() const;
-
-    Q_INVOKABLE Q_NODISCARD QColor getFrameBorderColor() const;
-    Q_INVOKABLE Q_NODISCARD QQuickAnchorLine getTopBorderBottom() const;
-
-public Q_SLOTS:
-    void showMinimized2();
-    void toggleMaximized();
-    void toggleFullScreen();
-
-private:
-    void initialize();
-    Q_NODISCARD bool shouldDrawFrameBorder() const;
-
-private Q_SLOTS:
-    void updateTopBorderColor();
-    void updateTopBorderHeight();
-
-private:
-    FramelessQuickWindow *q_ptr = nullptr;
-    QScopedPointer<QQuickRectangle> m_topBorderRectangle;
-    QScopedPointer<QQuickAnchors> m_topBorderAnchors;
-    QQuickWindow::Visibility m_savedVisibility = QQuickWindow::Windowed;
+    QQuickWindow::Visibility savedVisibility = QQuickWindow::Windowed;
+#if FRAMELESSHELPER_CONFIG(border_painter)
+    QuickWindowBorder *windowBorder = nullptr;
+#endif
 };
 
 FRAMELESSHELPER_END_NAMESPACE
+
 #endif

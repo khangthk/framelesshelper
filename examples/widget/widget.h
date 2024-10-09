@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (C) 2022 by wangwenx190 (Yuhang Zhao)
+ * Copyright (C) 2021-2023 by wangwenx190 (Yuhang Zhao)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,24 +24,31 @@
 
 #pragma once
 
-#include <FramelessWidget>
+#include <FramelessHelper/Widgets/framelesswidget.h>
+
+FRAMELESSHELPER_REQUIRE_CONFIG(window)
 
 QT_BEGIN_NAMESPACE
 class QLabel;
+class QShortcut;
 QT_END_NAMESPACE
 
+#if FRAMELESSHELPER_CONFIG(titlebar)
 FRAMELESSHELPER_BEGIN_NAMESPACE
 class StandardTitleBar;
 FRAMELESSHELPER_END_NAMESPACE
+#endif
 
 class Widget : public FRAMELESSHELPER_PREPEND_NAMESPACE(FramelessWidget)
 {
     Q_OBJECT
-    Q_DISABLE_COPY_MOVE(Widget)
+    Q_DISABLE_COPY(Widget)
 
 public:
     explicit Widget(QWidget *parent = nullptr);
     ~Widget() override;
+
+    void waitReady();
 
 protected:
     void timerEvent(QTimerEvent *event) override;
@@ -54,6 +61,13 @@ private Q_SLOTS:
     void updateStyleSheet();
 
 private:
-    QScopedPointer<QLabel> m_clockLabel;
-    QScopedPointer<FRAMELESSHELPER_PREPEND_NAMESPACE(StandardTitleBar)> m_titleBar;
+#if FRAMELESSHELPER_CONFIG(titlebar)
+    FRAMELESSHELPER_PREPEND_NAMESPACE(StandardTitleBar) *m_titleBar = nullptr;
+#endif
+    QLabel *m_clockLabel = nullptr;
+    QLabel *m_compilerInfoLabel = nullptr;
+    QLabel *m_commitInfoLabel = nullptr;
+    QShortcut *m_fullScreenShortcut = nullptr;
+    QShortcut *m_cancelShortcut = nullptr;
+    int m_timerId = -1;
 };

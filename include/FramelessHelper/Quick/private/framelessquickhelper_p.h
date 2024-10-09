@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (C) 2022 by wangwenx190 (Yuhang Zhao)
+ * Copyright (C) 2021-2023 by wangwenx190 (Yuhang Zhao)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,8 +24,9 @@
 
 #pragma once
 
-#include "framelesshelperquick_global.h"
-#include <QtCore/qobject.h>
+#include <FramelessHelper/Quick/framelesshelperquick_global.h>
+#include <QtCore/qtimer.h>
+#include <optional>
 
 QT_BEGIN_NAMESPACE
 class QQuickItem;
@@ -33,51 +34,58 @@ QT_END_NAMESPACE
 
 FRAMELESSHELPER_BEGIN_NAMESPACE
 
-struct QuickHelperData;
-class FramelessQuickHelper;
+#if FRAMELESSHELPER_CONFIG(mica_material)
+class QuickMicaMaterial;
+#endif
+#if FRAMELESSHELPER_CONFIG(border_painter)
+class QuickWindowBorder;
+#endif
 
+class FramelessQuickHelper;
 class FRAMELESSHELPER_QUICK_API FramelessQuickHelperPrivate : public QObject
 {
-    Q_OBJECT
-    Q_DECLARE_PUBLIC(FramelessQuickHelper)
-    Q_DISABLE_COPY_MOVE(FramelessQuickHelperPrivate)
+    FRAMELESSHELPER_PRIVATE_QT_CLASS(FramelessQuickHelper)
 
 public:
     explicit FramelessQuickHelperPrivate(FramelessQuickHelper *q);
     ~FramelessQuickHelperPrivate() override;
 
-    Q_NODISCARD static FramelessQuickHelperPrivate *get(FramelessQuickHelper *pub);
-    Q_NODISCARD static const FramelessQuickHelperPrivate *get(const FramelessQuickHelper *pub);
-
-    Q_NODISCARD QQuickItem *getTitleBarItem() const;
-    void setTitleBarItem(QQuickItem *value);
-
-    void attachToWindow();
-    void setSystemButton(QQuickItem *item, const QuickGlobal::SystemButtonType buttonType);
-    void setHitTestVisible(QQuickItem *item, const bool visible = true);
-    void showSystemMenu(const QPoint &pos);
-    void windowStartSystemMove2(const QPoint &pos);
-    void windowStartSystemResize2(const Qt::Edges edges, const QPoint &pos);
-
-    void moveWindowToDesktopCenter();
-    void bringWindowToFront();
-
-    Q_NODISCARD bool isWindowFixedSize() const;
-    void setWindowFixedSize(const bool value);
+    void attach();
+    void detach();
 
     void emitSignalForAllInstances(const char *signal);
 
-private:
+    void setProperty(const char *name, const QVariant &value);
+    Q_NODISCARD QVariant getProperty(const char *name, const QVariant &defaultValue = {});
+
+#if FRAMELESSHELPER_CONFIG(mica_material)
+    Q_NODISCARD QuickMicaMaterial *findOrCreateMicaMaterial() const;
+#endif
+#if FRAMELESSHELPER_CONFIG(border_painter)
+    Q_NODISCARD QuickWindowBorder *findOrCreateWindowBorder() const;
+#endif
+
+    Q_NODISCARD static FramelessQuickHelper *findOrCreateFramelessHelper(QObject *object);
+
+    void repaintAllChildren();
+    Q_INVOKABLE void doRepaintAllChildren();
+
+    Q_NODISCARD quint32 readyWaitTime() const;
+    void setReadyWaitTime(const quint32 time);
+
     Q_NODISCARD QRect mapItemGeometryToScene(const QQuickItem * const item) const;
     Q_NODISCARD bool isInSystemButtons(const QPoint &pos, QuickGlobal::SystemButtonType *button) const;
     Q_NODISCARD bool isInTitleBarDraggableArea(const QPoint &pos) const;
     Q_NODISCARD bool shouldIgnoreMouseEvents(const QPoint &pos) const;
     void setSystemButtonState(const QuickGlobal::SystemButtonType button, const QuickGlobal::ButtonState state);
-    Q_NODISCARD QuickHelperData getWindowData() const;
-    Q_NODISCARD QuickHelperData *getWindowDataMutable() const;
+    void rebindWindow();
 
-private:
-    FramelessQuickHelper *q_ptr = nullptr;
+    QColor savedWindowBackgroundColor = {};
+    bool blurBehindWindowEnabled = false;
+    std::optional<bool> extendIntoTitleBar = std::nullopt;
+    bool qpaReady = false;
+    quint32 qpaWaitTime = 0;
+    QTimer repaintTimer{};
 };
 
 FRAMELESSHELPER_END_NAMESPACE

@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (C) 2022 by wangwenx190 (Yuhang Zhao)
+ * Copyright (C) 2021-2023 by wangwenx190 (Yuhang Zhao)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,40 +24,27 @@
 
 #pragma once
 
-#include "framelesshelperwidgets_global.h"
-#include <QtCore/qobject.h>
+#include <FramelessHelper/Widgets/framelesshelperwidgets_global.h>
+
+#if FRAMELESSHELPER_CONFIG(window)
 
 FRAMELESSHELPER_BEGIN_NAMESPACE
 
-class FramelessMainWindow;
 class WidgetsSharedHelper;
 
+class FramelessMainWindow;
 class FRAMELESSHELPER_WIDGETS_API FramelessMainWindowPrivate : public QObject
 {
-    Q_OBJECT
-    Q_DECLARE_PUBLIC(FramelessMainWindow)
-    Q_DISABLE_COPY_MOVE(FramelessMainWindowPrivate)
+    FRAMELESSHELPER_PRIVATE_QT_CLASS(FramelessMainWindow)
 
 public:
     explicit FramelessMainWindowPrivate(FramelessMainWindow *q);
     ~FramelessMainWindowPrivate() override;
 
-    Q_NODISCARD static FramelessMainWindowPrivate *get(FramelessMainWindow *pub);
-    Q_NODISCARD static const FramelessMainWindowPrivate *get(const FramelessMainWindow *pub);
-
-    Q_NODISCARD bool isNormal() const;
-    Q_NODISCARD bool isZoomed() const;
-
-    void toggleMaximized();
-    void toggleFullScreen();
-
-private:
-    void initialize();
-
-private:
-    FramelessMainWindow *q_ptr = nullptr;
-    Qt::WindowState m_savedWindowState = Qt::WindowNoState;
-    QScopedPointer<WidgetsSharedHelper> m_helper;
+    Qt::WindowState savedWindowState = Qt::WindowNoState;
+    WidgetsSharedHelper *sharedHelper = nullptr;
 };
 
 FRAMELESSHELPER_END_NAMESPACE
+
+#endif

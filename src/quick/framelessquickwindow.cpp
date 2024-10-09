@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (C) 2022 by wangwenx190 (Yuhang Zhao)
+ * Copyright (C) 2021-2023 by wangwenx190 (Yuhang Zhao)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,16 +23,34 @@
  */
 
 #include "framelessquickwindow_p.h"
-#if (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
 #include "framelessquickwindow_p_p.h"
+
+#if (FRAMELESSHELPER_CONFIG(private_qt) && FRAMELESSHELPER_CONFIG(window))
+
 #include "framelessquickhelper.h"
+#if FRAMELESSHELPER_CONFIG(border_painter)
+#  include "quickwindowborder.h"
+#endif
+#ifdef Q_OS_WINDOWS
+#  include <FramelessHelper/Core/framelesshelper_windows.h>
+#endif // Q_OS_WINDOWS
+#include <QtCore/qloggingcategory.h>
 #include <QtQuick/private/qquickitem_p.h>
-#include <QtQuick/private/qquickrectangle_p.h>
-#include <QtQuick/private/qquickanchors_p.h>
-#include <framelessmanager.h>
-#include <utils.h>
 
 FRAMELESSHELPER_BEGIN_NAMESPACE
+
+#if FRAMELESSHELPER_CONFIG(debug_output)
+[[maybe_unused]] static Q_LOGGING_CATEGORY(lcFramelessQuickWindow, "wangwenx190.framelesshelper.quick.framelessquickwindow")
+#  define INFO qCInfo(lcFramelessQuickWindow)
+#  define DEBUG qCDebug(lcFramelessQuickWindow)
+#  define WARNING qCWarning(lcFramelessQuickWindow)
+#  define CRITICAL qCCritical(lcFramelessQuickWindow)
+#else
+#  define INFO QT_NO_QDEBUG_MACRO()
+#  define DEBUG QT_NO_QDEBUG_MACRO()
+#  define WARNING QT_NO_QDEBUG_MACRO()
+#  define CRITICAL QT_NO_QDEBUG_MACRO()
+#endif
 
 using namespace Global;
 
@@ -43,7 +61,6 @@ FramelessQuickWindowPrivate::FramelessQuickWindowPrivate(FramelessQuickWindow *q
         return;
     }
     q_ptr = q;
-    initialize();
 }
 
 FramelessQuickWindowPrivate::~FramelessQuickWindowPrivate() = default;
@@ -66,215 +83,104 @@ const FramelessQuickWindowPrivate *FramelessQuickWindowPrivate::get(const Framel
     return pub->d_func();
 }
 
-bool FramelessQuickWindowPrivate::isHidden() const
-{
-    Q_Q(const FramelessQuickWindow);
-    return (q->visibility() == FramelessQuickWindow::Hidden);
-}
-
-bool FramelessQuickWindowPrivate::isNormal() const
-{
-    Q_Q(const FramelessQuickWindow);
-    return (q->visibility() == FramelessQuickWindow::Windowed);
-}
-
-bool FramelessQuickWindowPrivate::isMinimized() const
-{
-    Q_Q(const FramelessQuickWindow);
-    return (q->visibility() == FramelessQuickWindow::Minimized);
-}
-
-bool FramelessQuickWindowPrivate::isMaximized() const
-{
-    Q_Q(const FramelessQuickWindow);
-    return (q->visibility() == FramelessQuickWindow::Maximized);
-}
-
-bool FramelessQuickWindowPrivate::isZoomed() const
-{
-    Q_Q(const FramelessQuickWindow);
-    return (isMaximized() || (q->visibility() == FramelessQuickWindow::FullScreen));
-}
-
-bool FramelessQuickWindowPrivate::isFullScreen() const
-{
-    Q_Q(const FramelessQuickWindow);
-    return (q->visibility() == FramelessQuickWindow::FullScreen);
-}
-
-QColor FramelessQuickWindowPrivate::getFrameBorderColor() const
-{
-#ifdef Q_OS_WINDOWS
-    Q_Q(const FramelessQuickWindow);
-    return Utils::getFrameBorderColor(q->isActive());
-#else
-    return {};
-#endif
-}
-
-QQuickAnchorLine FramelessQuickWindowPrivate::getTopBorderBottom() const
-{
-    return QQuickAnchorLine(m_topBorderRectangle.data(), QQuickAnchors::BottomAnchor);
-}
-
-void FramelessQuickWindowPrivate::showMinimized2()
-{
-    Q_Q(FramelessQuickWindow);
-#ifdef Q_OS_WINDOWS
-    // Work-around a QtQuick bug: https://bugreports.qt.io/browse/QTBUG-69711
-    // Don't use "SW_SHOWMINIMIZED" because it will activate the current window
-    // instead of the next window in the Z order, which is not the default behavior
-    // of native Win32 applications.
-    ShowWindow(reinterpret_cast<HWND>(q->winId()), SW_MINIMIZE);
-#else
-    q->showMinimized();
-#endif
-}
-
-void FramelessQuickWindowPrivate::toggleMaximized()
-{
-    Q_Q(FramelessQuickWindow);
-    if (isMaximized()) {
-        q->showNormal();
-    } else {
-        q->showMaximized();
-    }
-}
-
-void FramelessQuickWindowPrivate::toggleFullScreen()
-{
-    Q_Q(FramelessQuickWindow);
-    if (isFullScreen()) {
-        q->setVisibility(m_savedVisibility);
-    } else {
-        m_savedVisibility = q->visibility();
-        q->showFullScreen();
-    }
-}
-
-void FramelessQuickWindowPrivate::initialize()
-{
-    Q_Q(FramelessQuickWindow);
-    QQuickItem * const rootItem = q->contentItem();
-    FramelessQuickHelper::get(rootItem)->extendsContentIntoTitleBar();
-    m_topBorderRectangle.reset(new QQuickRectangle(rootItem));
-    m_topBorderRectangle->setZ(999); // Make sure the frame border stays on top of eveything.
-    m_topBorderRectangle->setColor(kDefaultTransparentColor);
-    m_topBorderRectangle->setHeight(0.0);
-    QQuickPen * const b = m_topBorderRectangle->border();
-    b->setWidth(0.0);
-    b->setColor(kDefaultTransparentColor);
-    updateTopBorderHeight();
-    updateTopBorderColor();
-    m_topBorderAnchors.reset(new QQuickAnchors(m_topBorderRectangle.data(), m_topBorderRectangle.data()));
-    const QQuickItemPrivate * const rootItemPrivate = QQuickItemPrivate::get(rootItem);
-    m_topBorderAnchors->setTop(rootItemPrivate->top());
-    m_topBorderAnchors->setLeft(rootItemPrivate->left());
-    m_topBorderAnchors->setRight(rootItemPrivate->right());
-    connect(q, &FramelessQuickWindow::visibilityChanged, this, [this, q](){
-        updateTopBorderHeight();
-        Q_EMIT q->hiddenChanged();
-        Q_EMIT q->normalChanged();
-        Q_EMIT q->minimizedChanged();
-        Q_EMIT q->maximizedChanged();
-        Q_EMIT q->zoomedChanged();
-        Q_EMIT q->fullScreenChanged();
-    });
-    connect(q, &FramelessQuickWindow::activeChanged, this, &FramelessQuickWindowPrivate::updateTopBorderColor);
-    connect(FramelessManager::instance(), &FramelessManager::systemThemeChanged, this, &FramelessQuickWindowPrivate::updateTopBorderColor);
-}
-
-bool FramelessQuickWindowPrivate::shouldDrawFrameBorder() const
-{
-#ifdef Q_OS_WINDOWS
-    static const bool isWin11OrGreater = Utils::isWindowsVersionOrGreater(WindowsVersion::_11_21H2);
-    return (Utils::isWindowFrameBorderVisible() && !isWin11OrGreater);
-#else
-    return false;
-#endif
-}
-
-void FramelessQuickWindowPrivate::updateTopBorderColor()
-{
-#ifdef Q_OS_WINDOWS
-    if (!shouldDrawFrameBorder()) {
-        return;
-    }
-    m_topBorderRectangle->setColor(getFrameBorderColor());
-#endif
-}
-
-void FramelessQuickWindowPrivate::updateTopBorderHeight()
-{
-#ifdef Q_OS_WINDOWS
-    if (!shouldDrawFrameBorder()) {
-        return;
-    }
-    const qreal newHeight = (isNormal() ? qreal(kDefaultWindowFrameBorderThickness) : 0.0);
-    m_topBorderRectangle->setHeight(newHeight);
-#endif
-}
-
 FramelessQuickWindow::FramelessQuickWindow(QWindow *parent)
-    : QQuickWindow(parent), d_ptr(new FramelessQuickWindowPrivate(this))
+    : QQuickWindowQmlImpl(parent), d_ptr(std::make_unique<FramelessQuickWindowPrivate>(this))
 {
+    QQuickItem * const rootItem = contentItem();
+    FramelessQuickHelper::get(rootItem)->extendsContentIntoTitleBar();
+#if FRAMELESSHELPER_CONFIG(border_painter)
+    Q_D(FramelessQuickWindow);
+    d->windowBorder = new QuickWindowBorder;
+    d->windowBorder->setParent(rootItem);
+    d->windowBorder->setParentItem(rootItem);
+    d->windowBorder->setZ(999); // Make sure it always stays on the top.
+    QQuickItemPrivate::get(d->windowBorder)->anchors()->setFill(rootItem);
+#endif
+    connect(this, &FramelessQuickWindow::visibilityChanged, this, [this](){
+        Q_EMIT hiddenChanged();
+        Q_EMIT normalChanged();
+        Q_EMIT minimizedChanged();
+        Q_EMIT maximizedChanged();
+        Q_EMIT zoomedChanged();
+        Q_EMIT fullScreenChanged();
+    });
 }
 
 FramelessQuickWindow::~FramelessQuickWindow() = default;
 
 bool FramelessQuickWindow::isHidden() const
 {
-    Q_D(const FramelessQuickWindow);
-    return d->isHidden();
+    return (visibility() == FramelessQuickWindow::Hidden);
 }
 
 bool FramelessQuickWindow::isNormal() const
 {
-    Q_D(const FramelessQuickWindow);
-    return d->isNormal();
+    return (visibility() == FramelessQuickWindow::Windowed);
 }
 
 bool FramelessQuickWindow::isMinimized() const
 {
-    Q_D(const FramelessQuickWindow);
-    return d->isMinimized();
+    return (visibility() == FramelessQuickWindow::Minimized);
 }
 
 bool FramelessQuickWindow::isMaximized() const
 {
-    Q_D(const FramelessQuickWindow);
-    return d->isMaximized();
+    return (visibility() == FramelessQuickWindow::Maximized);
 }
 
 bool FramelessQuickWindow::isZoomed() const
 {
-    Q_D(const FramelessQuickWindow);
-    return d->isZoomed();
+    return (isMaximized() || (visibility() == FramelessQuickWindow::FullScreen));
 }
 
 bool FramelessQuickWindow::isFullScreen() const
 {
-    Q_D(const FramelessQuickWindow);
-    return d->isFullScreen();
+    return (visibility() == FramelessQuickWindow::FullScreen);
 }
 
 void FramelessQuickWindow::showMinimized2()
 {
-    Q_D(FramelessQuickWindow);
-    d->showMinimized2();
+#ifdef Q_OS_WINDOWS
+    // Work-around a QtQuick bug: https://bugreports.qt.io/browse/QTBUG-69711
+    // Don't use "SW_SHOWMINIMIZED" because it will activate the current window
+    // instead of the next window in the Z order, which is not the default behavior
+    // of native Win32 applications.
+    ::ShowWindow(reinterpret_cast<HWND>(winId()), SW_MINIMIZE);
+#else
+    showMinimized();
+#endif
 }
 
 void FramelessQuickWindow::toggleMaximized()
 {
-    Q_D(FramelessQuickWindow);
-    d->toggleMaximized();
+    if (isMaximized()) {
+        showNormal();
+    } else {
+        showMaximized();
+    }
 }
 
 void FramelessQuickWindow::toggleFullScreen()
 {
     Q_D(FramelessQuickWindow);
-    d->toggleFullScreen();
+    if (isFullScreen()) {
+        setVisibility(d->savedVisibility);
+    } else {
+        d->savedVisibility = visibility();
+        showFullScreen();
+    }
+}
+
+void FramelessQuickWindow::classBegin()
+{
+    QQuickWindowQmlImpl::classBegin();
+}
+
+void FramelessQuickWindow::componentComplete()
+{
+    QQuickWindowQmlImpl::componentComplete();
 }
 
 FRAMELESSHELPER_END_NAMESPACE
+
 #endif

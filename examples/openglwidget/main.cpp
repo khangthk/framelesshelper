@@ -52,7 +52,10 @@
 #include <QApplication>
 #include <QSurfaceFormat>
 #include <QOpenGLContext>
+#include <FramelessHelper/Core/private/framelessconfig_p.h>
+#include <clocale>
 #include "mainwindow.h"
+#include "../shared/log.h"
 
 // This example demonstrates easy, cross-platform usage of OpenGL ES 3.0 functions via
 // QOpenGLExtraFunctions in an application that works identically on desktop platforms
@@ -66,11 +69,23 @@ FRAMELESSHELPER_USE_NAMESPACE
 
 int main(int argc, char *argv[])
 {
+    std::setlocale(LC_ALL, "en_US.UTF-8");
+
+    Log::setup(FRAMELESSHELPER_STRING_LITERAL("openglwidget"));
+
     // Not necessary, but better call this function, before the construction
     // of any Q(Core|Gui)Application instances.
-    FramelessHelper::Core::initialize();
+    FramelessHelper::Widgets::initialize();
 
-    QApplication application(argc, argv);
+    const auto application = std::make_unique<QApplication>(argc, argv);
+
+    // Must be called after QGuiApplication has been constructed, we are using
+    // some private functions from QPA which won't be available until there's
+    // a QGuiApplication instance.
+    FramelessHelper::Core::setApplicationOSThemeAware();
+
+    FramelessConfig::instance()->set(Global::Option::EnableBlurBehindWindow);
+    FramelessConfig::instance()->set(Global::Option::DisableLazyInitializationForMicaMaterial);
 
     QSurfaceFormat fmt = {};
     fmt.setDepthBufferSize(24);
@@ -87,8 +102,9 @@ int main(int argc, char *argv[])
 
     QSurfaceFormat::setDefaultFormat(fmt);
 
-    MainWindow mainWindow;
-    mainWindow.show();
+    const auto mainWindow = std::make_unique<MainWindow>();
+    mainWindow->waitReady();
+    mainWindow->show();
 
     return QCoreApplication::exec();
 }

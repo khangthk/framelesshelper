@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (C) 2022 by wangwenx190 (Yuhang Zhao)
+ * Copyright (C) 2021-2023 by wangwenx190 (Yuhang Zhao)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,61 +23,159 @@
  */
 
 #include "framelesshelper_qt.h"
-#include <QtCore/qmutex.h>
-#include <QtGui/qevent.h>
-#include <QtGui/qwindow.h>
+
+#if !FRAMELESSHELPER_CONFIG(native_impl)
+
 #include "framelessmanager.h"
 #include "framelessmanager_p.h"
+#include "framelessconfig_p.h"
+#include "framelesshelpercore_global_p.h"
 #include "utils.h"
+#include <QtCore/qloggingcategory.h>
+#include <QtGui/qevent.h>
+#include <QtGui/qwindow.h>
 
 FRAMELESSHELPER_BEGIN_NAMESPACE
 
+#if FRAMELESSHELPER_CONFIG(debug_output)
+[[maybe_unused]] static Q_LOGGING_CATEGORY(lcFramelessHelperQt, "wangwenx190.framelesshelper.core.impl.qt")
+#  define INFO qCInfo(lcFramelessHelperQt)
+#  define DEBUG qCDebug(lcFramelessHelperQt)
+#  define WARNING qCWarning(lcFramelessHelperQt)
+#  define CRITICAL qCCritical(lcFramelessHelperQt)
+#else
+#  define INFO QT_NO_QDEBUG_MACRO()
+#  define DEBUG QT_NO_QDEBUG_MACRO()
+#  define WARNING QT_NO_QDEBUG_MACRO()
+#  define CRITICAL QT_NO_QDEBUG_MACRO()
+#endif
+
 using namespace Global;
 
-struct QtHelperData
+struct FramelessDataQt : public FramelessData
 {
-    SystemParameters params = {};
-    FramelessHelperQt *eventFilter = nullptr;
+    FramelessHelperQt *framelessHelperImpl = nullptr;
     bool cursorShapeChanged = false;
     bool leftButtonPressed = false;
-};
 
-struct QtHelper
+    FramelessDataQt();
+    ~FramelessDataQt() override;
+};
+using FramelessDataQtPtr = std::shared_ptr<FramelessDataQt>;
+
+[[nodiscard]] static inline FramelessDataQtPtr tryGetData(const QObject *window)
 {
-    QMutex mutex;
-    QHash<WId, QtHelperData> data = {};
+    Q_ASSERT(window);
+    if (!window) {
+        return nullptr;
+    }
+    const FramelessDataPtr data = FramelessManagerPrivate::getData(window);
+    if (!data) {
+        return nullptr;
+    }
+    return std::dynamic_pointer_cast<FramelessDataQt>(data);
+}
+
+class FramelessHelperQtPrivate
+{
+    FRAMELESSHELPER_PRIVATE_CLASS(FramelessHelperQt)
+
+public:
+    explicit FramelessHelperQtPrivate(FramelessHelperQt *q);
+    ~FramelessHelperQtPrivate();
+
+    const QObject *window = nullptr;
 };
 
-Q_GLOBAL_STATIC(QtHelper, g_qtHelper)
+FramelessDataQt::FramelessDataQt() = default;
 
-FramelessHelperQt::FramelessHelperQt(QObject *parent) : QObject(parent) {}
+FramelessDataQt::~FramelessDataQt() = default;
+
+[[nodiscard]] FramelessDataPtr FramelessData::create()
+{
+    return std::make_shared<FramelessDataQt>();
+}
+
+FramelessHelperQtPrivate::FramelessHelperQtPrivate(FramelessHelperQt *q) : q_ptr(q)
+{
+    Q_ASSERT(q_ptr);
+}
+
+FramelessHelperQtPrivate::~FramelessHelperQtPrivate() = default;
+
+FramelessHelperQt::FramelessHelperQt(QObject *parent) : QObject(parent), d_ptr(std::make_unique<FramelessHelperQtPrivate>(this))
+{
+}
 
 FramelessHelperQt::~FramelessHelperQt() = default;
 
-void FramelessHelperQt::addWindow(const SystemParameters &params)
+void FramelessHelperQt::addWindow(const QObject *window)
 {
-    Q_ASSERT(params.isValid());
-    if (!params.isValid()) {
+    Q_ASSERT(window);
+    if (!window) {
         return;
     }
-    const WId windowId = params.getWindowId();
-    g_qtHelper()->mutex.lock();
-    if (g_qtHelper()->data.contains(windowId)) {
-        g_qtHelper()->mutex.unlock();
+    const FramelessDataQtPtr data = tryGetData(window);
+    if (!data || data->frameless || !data->callbacks) {
         return;
     }
-    QtHelperData data = {};
-    data.params = params;
-    QWindow *window = params.getWindowHandle();
-    // Give it a parent so that it can be deleted even if we forget to do so.
-    data.eventFilter = new FramelessHelperQt(window);
-    g_qtHelper()->data.insert(windowId, data);
-    g_qtHelper()->mutex.unlock();
-    params.setWindowFlags(params.getWindowFlags() | Qt::FramelessWindowHint);
-    window->installEventFilter(data.eventFilter);
+    QWindow *qWindow = data->callbacks->getWindowHandle();
+    Q_ASSERT(qWindow);
+    if (!qWindow) {
+        return;
+    }
+    data->frameless = true;
+    static const auto shouldApplyFramelessFlag = []() -> bool {
 #ifdef Q_OS_MACOS
-    Utils::setSystemTitleBarVisible(windowId, false);
-#endif
+        return false;
+#elif (defined(Q_OS_LINUX) && !defined(Q_OS_ANDROID))
+        return !Utils::isCustomDecorationSupported();
+#elif defined(Q_OS_WINDOWS)
+        return true;
+#endif // Q_OS_MACOS
+    }();
+#if (defined(Q_OS_MACOS) && (QT_VERSION < QT_VERSION_CHECK(6, 0, 0)))
+    qWindow->setProperty("_q_mac_wantsLayer", 1);
+#endif // (defined(Q_OS_MACOS) && (QT_VERSION < QT_VERSION_CHECK(6, 0, 0)))
+    if (shouldApplyFramelessFlag) {
+        data->callbacks->setWindowFlags(data->callbacks->getWindowFlags() | Qt::FramelessWindowHint);
+    } else {
+#if (defined(Q_OS_LINUX) && !defined(Q_OS_ANDROID))
+        std::ignore = Utils::tryHideSystemTitleBar(data->callbacks->getWindowId(), true);
+#elif defined(Q_OS_MACOS)
+        Utils::setSystemTitleBarVisible(data->callbacks->getWindowId(), false);
+#endif // Q_OS_LINUX
+    }
+    if (!data->framelessHelperImpl) {
+        data->framelessHelperImpl = new FramelessHelperQt(qWindow);
+        data->framelessHelperImpl->d_func()->window = window;
+        qWindow->installEventFilter(data->framelessHelperImpl);
+    }
+    FramelessHelperEnableThemeAware();
+}
+
+void FramelessHelperQt::removeWindow(const QObject *window)
+{
+    Q_ASSERT(window);
+    if (!window) {
+        return;
+    }
+    const FramelessDataQtPtr data = tryGetData(window);
+    if (!data || !data->frameless || !data->callbacks) {
+        return;
+    }
+    if (data->framelessHelperImpl) {
+        QWindow *qWindow = data->callbacks->getWindowHandle();
+        Q_ASSERT(qWindow);
+        if (qWindow) {
+            qWindow->removeEventFilter(data->framelessHelperImpl);
+            delete data->framelessHelperImpl;
+            data->framelessHelperImpl = nullptr;
+        }
+    }
+#ifdef Q_OS_MACOS
+    Utils::removeWindowProxy(data->callbacks->getWindowId());
+#endif // Q_OS_MACOS
 }
 
 bool FramelessHelperQt::eventFilter(QObject *object, QEvent *event)
@@ -87,33 +185,47 @@ bool FramelessHelperQt::eventFilter(QObject *object, QEvent *event)
     if (!object || !event) {
         return false;
     }
-    // First detect whether we got a theme change event or not, if so,
-    // inform the user the system theme has changed.
+#if (QT_VERSION < QT_VERSION_CHECK(6, 5, 0))
     if (Utils::isThemeChangeEvent(event)) {
-        FramelessManager *manager = FramelessManager::instance();
-        FramelessManagerPrivate *managerPriv = FramelessManagerPrivate::get(manager);
-        managerPriv->notifySystemThemeHasChangedOrNot();
+        // Sometimes the FramelessManager instance may be destroyed already.
+        if (FramelessManager *manager = FramelessManager::instance()) {
+            if (FramelessManagerPrivate *managerPriv = FramelessManagerPrivate::get(manager)) {
+                managerPriv->notifySystemThemeHasChangedOrNot();
+            }
+        }
         return false;
     }
-    // We are only interested in events that are dispatched to top level windows.
-    if (!object->isWindowType()) {
+#endif // (QT_VERSION < QT_VERSION_CHECK(6, 5, 0))
+    Q_D(FramelessHelperQt);
+    if (!d->window || !object->isWindowType()) {
         return false;
     }
     const QEvent::Type type = event->type();
-    // We are only interested in some specific mouse events.
+    // We are only interested in some specific mouse events (plus the DPR change event).
     if ((type != QEvent::MouseButtonPress) && (type != QEvent::MouseButtonRelease)
-        && (type != QEvent::MouseButtonDblClick) && (type != QEvent::MouseMove)) {
+            && (type != QEvent::MouseButtonDblClick) && (type != QEvent::MouseMove)
+#if (QT_VERSION >= QT_VERSION_CHECK(6, 6, 0))
+            && (type != QEvent::DevicePixelRatioChange)
+#else // QT_VERSION < QT_VERSION_CHECK(6, 6, 0)
+            && (type != QEvent::ScreenChangeInternal) // Qt's internal event to notify screen change and DPR change.
+#endif // (QT_VERSION >= QT_VERSION_CHECK(6, 6, 0))
+            ) {
         return false;
     }
-    const auto window = qobject_cast<QWindow *>(object);
-    const WId windowId = window->winId();
-    g_qtHelper()->mutex.lock();
-    if (!g_qtHelper()->data.contains(windowId)) {
-        g_qtHelper()->mutex.unlock();
+    const FramelessDataQtPtr data = tryGetData(d->window);
+    if (!data || !data->frameless || !data->callbacks) {
         return false;
     }
-    const QtHelperData data = g_qtHelper()->data.value(windowId);
-    g_qtHelper()->mutex.unlock();
+#if (QT_VERSION >= QT_VERSION_CHECK(6, 6, 0))
+    if (type == QEvent::DevicePixelRatioChange)
+#else // QT_VERSION < QT_VERSION_CHECK(6, 6, 0)
+    if (type == QEvent::ScreenChangeInternal)
+#endif // (QT_VERSION >= QT_VERSION_CHECK(6, 6, 0))
+    {
+        data->callbacks->forceChildrenRepaint();
+        return false;
+    }
+    const auto qWindow = qobject_cast<QWindow *>(object);
     const auto mouseEvent = static_cast<QMouseEvent *>(event);
     const Qt::MouseButton button = mouseEvent->button();
 #if (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
@@ -123,63 +235,64 @@ bool FramelessHelperQt::eventFilter(QObject *object, QEvent *event)
     const QPoint scenePos = mouseEvent->windowPos().toPoint();
     const QPoint globalPos = mouseEvent->screenPos().toPoint();
 #endif
-    const bool windowFixedSize = data.params.isWindowFixedSize();
-    const bool ignoreThisEvent = data.params.shouldIgnoreMouseEvents(scenePos);
-    const bool insideTitleBar = data.params.isInsideTitleBarDraggableArea(scenePos);
+    const bool windowFixedSize = data->callbacks->isWindowFixedSize();
+    const bool ignoreThisEvent = data->callbacks->shouldIgnoreMouseEvents(scenePos);
+    const bool insideTitleBar = data->callbacks->isInsideTitleBarDraggableArea(scenePos);
+    const bool dontOverrideCursor = data->callbacks->getProperty(kDontOverrideCursorVar, false).toBool();
+    const bool dontToggleMaximize = data->callbacks->getProperty(kDontToggleMaximizeVar, false).toBool();
     switch (type) {
-    case QEvent::MouseButtonPress: {
+    case QEvent::MouseButtonPress:
         if (button == Qt::LeftButton) {
-            g_qtHelper()->mutex.lock();
-            g_qtHelper()->data[windowId].leftButtonPressed = true;
-            g_qtHelper()->mutex.unlock();
+            data->leftButtonPressed = true;
             if (!windowFixedSize) {
-                const Qt::Edges edges = Utils::calculateWindowEdges(window, scenePos);
+                const Qt::Edges edges = Utils::calculateWindowEdges(qWindow, scenePos);
                 if (edges != Qt::Edges{}) {
-                    Utils::startSystemResize(window, edges, globalPos);
+                    std::ignore = Utils::startSystemResize(qWindow, edges, globalPos);
+                    event->accept();
                     return true;
                 }
             }
         }
-    } break;
-    case QEvent::MouseButtonRelease: {
+        break;
+    case QEvent::MouseButtonRelease:
         if (button == Qt::LeftButton) {
-            QMutexLocker locker(&g_qtHelper()->mutex);
-            g_qtHelper()->data[windowId].leftButtonPressed = false;
-        }
-        if (button == Qt::RightButton) {
+            data->leftButtonPressed = false;
+        } else if (button == Qt::RightButton) {
             if (!ignoreThisEvent && insideTitleBar) {
-                data.params.showSystemMenu(scenePos);
+                data->callbacks->showSystemMenu(globalPos);
+                event->accept();
                 return true;
             }
         }
-    } break;
-    case QEvent::MouseButtonDblClick: {
-        if ((button == Qt::LeftButton) && !windowFixedSize && !ignoreThisEvent && insideTitleBar) {
+        break;
+    case QEvent::MouseButtonDblClick:
+        if (!dontToggleMaximize && (button == Qt::LeftButton) && !windowFixedSize && !ignoreThisEvent && insideTitleBar) {
             Qt::WindowState newWindowState = Qt::WindowNoState;
-            if (data.params.getWindowState() != Qt::WindowMaximized) {
+            if (data->callbacks->getWindowState() != Qt::WindowMaximized) {
                 newWindowState = Qt::WindowMaximized;
             }
-            data.params.setWindowState(newWindowState);
+            data->callbacks->setWindowState(newWindowState);
+            event->accept();
+            return true;
         }
-    } break;
+        break;
     case QEvent::MouseMove: {
-        if (!windowFixedSize) {
-            const Qt::CursorShape cs = Utils::calculateCursorShape(window, scenePos);
+        if (!dontOverrideCursor && !windowFixedSize) {
+            const Qt::CursorShape cs = Utils::calculateCursorShape(qWindow, scenePos);
             if (cs == Qt::ArrowCursor) {
-                if (data.cursorShapeChanged) {
-                    window->unsetCursor();
-                    QMutexLocker locker(&g_qtHelper()->mutex);
-                    g_qtHelper()->data[windowId].cursorShapeChanged = false;
+                if (data->cursorShapeChanged) {
+                    data->callbacks->unsetCursor();
+                    data->cursorShapeChanged = false;
                 }
             } else {
-                window->setCursor(cs);
-                QMutexLocker locker(&g_qtHelper()->mutex);
-                g_qtHelper()->data[windowId].cursorShapeChanged = true;
+                data->callbacks->setCursor(cs);
+                data->cursorShapeChanged = true;
             }
         }
-        if (data.leftButtonPressed) {
+        if (data->leftButtonPressed) {
             if (!ignoreThisEvent && insideTitleBar) {
-                Utils::startSystemMove(window, globalPos);
+                std::ignore = Utils::startSystemMove(qWindow, globalPos);
+                event->accept();
                 return true;
             }
         }
@@ -191,3 +304,5 @@ bool FramelessHelperQt::eventFilter(QObject *object, QEvent *event)
 }
 
 FRAMELESSHELPER_END_NAMESPACE
+
+#endif // !native_impl

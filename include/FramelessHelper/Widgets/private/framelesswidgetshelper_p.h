@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (C) 2022 by wangwenx190 (Yuhang Zhao)
+ * Copyright (C) 2021-2023 by wangwenx190 (Yuhang Zhao)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,57 +24,68 @@
 
 #pragma once
 
-#include "framelesshelperwidgets_global.h"
-#include <QtCore/qobject.h>
+#include <FramelessHelper/Widgets/framelesshelperwidgets_global.h>
+#include <QtCore/qvariant.h>
+#include <QtCore/qtimer.h>
+#include <QtWidgets/qsizepolicy.h>
 
 FRAMELESSHELPER_BEGIN_NAMESPACE
 
-struct WidgetsHelperData;
-class FramelessWidgetsHelper;
+#if FRAMELESSHELPER_CONFIG(mica_material)
+class MicaMaterial;
+#endif
+#if FRAMELESSHELPER_CONFIG(border_painter)
+class WindowBorderPainter;
+#endif
+class WidgetsSharedHelper;
 
+class FramelessWidgetsHelper;
 class FRAMELESSHELPER_WIDGETS_API FramelessWidgetsHelperPrivate : public QObject
 {
-    Q_OBJECT
-    Q_DECLARE_PUBLIC(FramelessWidgetsHelper)
-    Q_DISABLE_COPY_MOVE(FramelessWidgetsHelperPrivate)
+    FRAMELESSHELPER_PRIVATE_QT_CLASS(FramelessWidgetsHelper)
 
 public:
     explicit FramelessWidgetsHelperPrivate(FramelessWidgetsHelper *q);
     ~FramelessWidgetsHelperPrivate() override;
 
-    Q_NODISCARD static FramelessWidgetsHelperPrivate *get(FramelessWidgetsHelper *pub);
-    Q_NODISCARD static const FramelessWidgetsHelperPrivate *get(const FramelessWidgetsHelper *pub);
-
-    Q_NODISCARD QWidget *getTitleBarWidget() const;
-    void setTitleBarWidget(QWidget *widget);
-
-    void attachToWindow();
-    void setSystemButton(QWidget *widget, const Global::SystemButtonType buttonType);
-    void setHitTestVisible(QWidget *widget, const bool visible = true);
-    void showSystemMenu(const QPoint &pos);
-    void windowStartSystemMove2(const QPoint &pos);
-    void windowStartSystemResize2(const Qt::Edges edges, const QPoint &pos);
-
-    void moveWindowToDesktopCenter();
-    void bringWindowToFront();
-
-    Q_NODISCARD bool isWindowFixedSize() const;
-    void setWindowFixedSize(const bool value);
+    void attach();
+    void detach();
 
     void emitSignalForAllInstances(const char *signal);
 
-private:
+    void setProperty(const char *name, const QVariant &value);
+    Q_NODISCARD QVariant getProperty(const char *name, const QVariant &defaultValue = {});
+
+#if FRAMELESSHELPER_CONFIG(mica_material)
+    Q_NODISCARD MicaMaterial *getMicaMaterialIfAny() const;
+#endif
+#if FRAMELESSHELPER_CONFIG(border_painter)
+    Q_NODISCARD WindowBorderPainter *getWindowBorderIfAny() const;
+#endif
+
+    Q_NODISCARD static WidgetsSharedHelper *findOrCreateSharedHelper(QWidget *window);
+    Q_NODISCARD static FramelessWidgetsHelper *findOrCreateFramelessHelper(QObject *object);
+
+    void repaintAllChildren();
+    Q_INVOKABLE void doRepaintAllChildren();
+
+    Q_NODISCARD quint32 readyWaitTime() const;
+    void setReadyWaitTime(const quint32 time);
+
     Q_NODISCARD QRect mapWidgetGeometryToScene(const QWidget * const widget) const;
     Q_NODISCARD bool isInSystemButtons(const QPoint &pos, Global::SystemButtonType *button) const;
     Q_NODISCARD bool isInTitleBarDraggableArea(const QPoint &pos) const;
     Q_NODISCARD bool shouldIgnoreMouseEvents(const QPoint &pos) const;
     void setSystemButtonState(const Global::SystemButtonType button, const Global::ButtonState state);
-    Q_NODISCARD QWidget *getWindow() const;
-    Q_NODISCARD WidgetsHelperData getWindowData() const;
-    Q_NODISCARD WidgetsHelperData *getWindowDataMutable() const;
+    Q_NODISCARD QWidget *findTopLevelWindow() const;
 
-private:
-    FramelessWidgetsHelper *q_ptr = nullptr;
+    QColor savedWindowBackgroundColor = {};
+    bool blurBehindWindowEnabled = false;
+    QPointer<QWidget> window; // Initializing it with nullptr causes compilation errors on MinGW toolchain and old Qt versions (< 5.15).
+    bool qpaReady = false;
+    QSizePolicy savedSizePolicy = {};
+    quint32 qpaWaitTime = 0;
+    QTimer repaintTimer{};
 };
 
 FRAMELESSHELPER_END_NAMESPACE

@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (C) 2022 by wangwenx190 (Yuhang Zhao)
+ * Copyright (C) 2021-2023 by wangwenx190 (Yuhang Zhao)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,42 +24,68 @@
 
 #pragma once
 
-#include "framelesshelpercore_global.h"
-#include <QtCore/qobject.h>
+#include <FramelessHelper/Core/framelesshelpercore_global.h>
+#include <QtCore/qtimer.h>
+#include <optional>
 
 FRAMELESSHELPER_BEGIN_NAMESPACE
 
-class FramelessManager;
+struct FramelessData;
+using FramelessDataPtr = std::shared_ptr<FramelessData>;
 
+class FramelessManager;
 class FRAMELESSHELPER_CORE_API FramelessManagerPrivate : public QObject
 {
-    Q_OBJECT
-    Q_DECLARE_PUBLIC(FramelessManager)
-    Q_DISABLE_COPY_MOVE(FramelessManagerPrivate)
+    FRAMELESSHELPER_PRIVATE_QT_CLASS(FramelessManager)
 
 public:
     explicit FramelessManagerPrivate(FramelessManager *q);
     ~FramelessManagerPrivate() override;
 
-    Q_NODISCARD static FramelessManagerPrivate *get(FramelessManager *pub);
-    Q_NODISCARD static const FramelessManagerPrivate *get(const FramelessManager *pub);
+    static void initializeIconFont();
+    Q_NODISCARD static QFont getIconFont();
 
-    Q_NODISCARD Global::SystemTheme systemTheme() const;
-    Q_NODISCARD QColor systemAccentColor() const;
+    Q_SLOT void notifySystemThemeHasChangedOrNot();
+    Q_SLOT void notifyWallpaperHasChangedOrNot();
 
-    static void addWindow(const Global::SystemParameters &params);
-    Q_INVOKABLE void notifySystemThemeHasChangedOrNot();
+    Q_NODISCARD bool isThemeOverrided() const;
 
-private:
     void initialize();
 
-private:
-    FramelessManager *q_ptr = nullptr;
-    Global::SystemTheme m_systemTheme = Global::SystemTheme::Unknown;
-    QColor m_accentColor = {};
+    void doNotifySystemThemeHasChangedOrNot();
+    void doNotifyWallpaperHasChangedOrNot();
+
+    Q_NODISCARD static FramelessDataPtr getData(const QObject *window);
+    Q_NODISCARD static FramelessDataPtr createData(const QObject *window, const WId windowId);
+    Q_NODISCARD static WId getWindowId(const QObject *window);
+    Q_NODISCARD static QObject *getWindow(const WId windowId);
+    static void updateWindowId(const QObject *window, const WId newWindowId);
+
+    Global::SystemTheme systemTheme = Global::SystemTheme::Unknown;
+    std::optional<Global::SystemTheme> overrideTheme = std::nullopt;
+    QColor accentColor = {};
 #ifdef Q_OS_WINDOWS
-    Global::DwmColorizationArea m_colorizationArea = Global::DwmColorizationArea::None_;
+    Global::DwmColorizationArea colorizationArea = Global::DwmColorizationArea::None;
 #endif
+    QString wallpaper = {};
+    Global::WallpaperAspectStyle wallpaperAspectStyle = Global::WallpaperAspectStyle::Fill;
+    QTimer themeTimer{};
+    QTimer wallpaperTimer{};
+};
+
+class InternalEventFilter : public QObject
+{
+    FRAMELESSHELPER_QT_CLASS(InternalEventFilter)
+
+public:
+    explicit InternalEventFilter(const QObject *window, QObject *parent = nullptr);
+    ~InternalEventFilter() override;
+
+protected:
+    Q_NODISCARD bool eventFilter(QObject *object, QEvent *event) override;
+
+private:
+    const QObject *m_window = nullptr;
 };
 
 FRAMELESSHELPER_END_NAMESPACE

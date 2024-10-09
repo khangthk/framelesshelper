@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (C) 2022 by wangwenx190 (Yuhang Zhao)
+ * Copyright (C) 2021-2023 by wangwenx190 (Yuhang Zhao)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,76 +24,35 @@
 
 #pragma once
 
-#include <QtCore/qobject.h>
-#include <QtGui/qpixmap.h>
-#include "framelesshelperwidgets_global.h"
+#include <FramelessHelper/Widgets/framelesshelperwidgets_global.h>
+#include <optional>
 
-QT_BEGIN_NAMESPACE
-class QEnterEvent;
-class QPaintEvent;
-QT_END_NAMESPACE
+#if FRAMELESSHELPER_CONFIG(system_button)
 
 FRAMELESSHELPER_BEGIN_NAMESPACE
 
 class StandardSystemButton;
-
 class FRAMELESSHELPER_WIDGETS_API StandardSystemButtonPrivate : public QObject
 {
-    Q_OBJECT
-    Q_DECLARE_PUBLIC(StandardSystemButton)
-    Q_DISABLE_COPY_MOVE(StandardSystemButtonPrivate)
+    FRAMELESSHELPER_PRIVATE_QT_CLASS(StandardSystemButton)
 
 public:
     explicit StandardSystemButtonPrivate(StandardSystemButton *q);
     ~StandardSystemButtonPrivate() override;
 
-    Q_NODISCARD static StandardSystemButtonPrivate *get(StandardSystemButton *pub);
-    Q_NODISCARD static const StandardSystemButtonPrivate *get(const StandardSystemButton *pub);
+    Q_NODISCARD static QSize getRecommendedButtonSize();
 
-    void refreshButtonTheme(const bool force);
-
-    Q_NODISCARD Global::SystemButtonType getButtonType() const;
-    void setButtonType(const Global::SystemButtonType type);
-
-    void setIcon(const QIcon &value, const bool reverse);
-    void setPixmap(const QPixmap &value, const bool reverse);
-    void setImage(const QImage &value, const bool reverse);
-
-    Q_NODISCARD QSize getRecommendedButtonSize() const;
-
-    Q_NODISCARD bool isHovered() const;
-    Q_NODISCARD bool isPressed() const;
-    Q_NODISCARD QColor getHoverColor() const;
-    Q_NODISCARD QColor getPressColor() const;
-
-    void setHovered(const bool value);
-    void setPressed(const bool value);
-    void setHoverColor(const QColor &value);
-    void setPressColor(const QColor &value);
-
-    void enterEventHandler(QT_ENTER_EVENT_TYPE *event);
-    void leaveEventHandler(QEvent *event);
-    void paintEventHandler(QPaintEvent *event);
-
-    void setInactive(const bool value);
-
-private:
-    void initialize();
-    void checkInactive();
-
-private:
-    StandardSystemButton *q_ptr = nullptr;
-    Global::SystemTheme m_buttonTheme = Global::SystemTheme::Unknown;
-    Global::SystemButtonType m_buttonType = Global::SystemButtonType::Unknown;
-    QPixmap m_icon = {};
-    QPixmap m_reversedIcon = {};
-    QColor m_hoverColor = {};
-    QColor m_pressColor = {};
-    bool m_hovered = false;
-    bool m_pressed = false;
-    bool m_forceLightTheme = false;
-    bool m_shouldCheck = false;
-    bool m_checkFlag = false;
+    Global::SystemButtonType buttonType = Global::SystemButtonType::Unknown;
+    QString glyph = {};
+    QColor hoverColor = {};
+    QColor pressColor = {};
+    QColor normalColor = {};
+    QColor activeForegroundColor = {};
+    QColor inactiveForegroundColor = {};
+    bool active = false;
+    std::optional<int> glyphSize = std::nullopt;
 };
 
 FRAMELESSHELPER_END_NAMESPACE
+
+#endif

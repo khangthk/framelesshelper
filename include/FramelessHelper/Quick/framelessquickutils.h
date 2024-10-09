@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (C) 2022 by wangwenx190 (Yuhang Zhao)
+ * Copyright (C) 2021-2023 by wangwenx190 (Yuhang Zhao)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,10 +24,8 @@
 
 #pragma once
 
-#include "framelesshelperquick_global.h"
-#include <QtCore/qobject.h>
-#include <QtGui/qcolor.h>
-#include <QtQml/qqml.h>
+#include <FramelessHelper/Quick/framelesshelperquick_global.h>
+#include <QtQml/qqmlparserstatus.h>
 
 QT_BEGIN_NAMESPACE
 class QQuickWindow;
@@ -35,10 +33,10 @@ QT_END_NAMESPACE
 
 FRAMELESSHELPER_BEGIN_NAMESPACE
 
-class FRAMELESSHELPER_QUICK_API FramelessQuickUtils : public QObject
+class FRAMELESSHELPER_QUICK_API FramelessQuickUtils : public QObject, public QQmlParserStatus
 {
-    Q_OBJECT
-    Q_DISABLE_COPY_MOVE(FramelessQuickUtils)
+    FRAMELESSHELPER_QT_CLASS(FramelessQuickUtils)
+    Q_INTERFACES(QQmlParserStatus)
 #ifdef QML_NAMED_ELEMENT
     QML_NAMED_ELEMENT(FramelessUtils)
 #endif
@@ -48,7 +46,7 @@ class FRAMELESSHELPER_QUICK_API FramelessQuickUtils : public QObject
     Q_PROPERTY(qreal titleBarHeight READ titleBarHeight CONSTANT FINAL)
     Q_PROPERTY(bool frameBorderVisible READ frameBorderVisible CONSTANT FINAL)
     Q_PROPERTY(qreal frameBorderThickness READ frameBorderThickness CONSTANT FINAL)
-    Q_PROPERTY(QuickGlobal::SystemTheme systemTheme READ systemTheme NOTIFY systemThemeChanged FINAL)
+    Q_PROPERTY(QuickGlobal::SystemTheme systemTheme READ systemTheme WRITE setOverrideTheme NOTIFY systemThemeChanged FINAL)
     Q_PROPERTY(QColor systemAccentColor READ systemAccentColor NOTIFY systemAccentColorChanged FINAL)
     Q_PROPERTY(bool titleBarColorized READ titleBarColorized NOTIFY titleBarColorizedChanged FINAL)
     Q_PROPERTY(QColor defaultSystemLightColor READ defaultSystemLightColor CONSTANT FINAL)
@@ -57,6 +55,7 @@ class FRAMELESSHELPER_QUICK_API FramelessQuickUtils : public QObject
     Q_PROPERTY(QSizeF defaultSystemButtonIconSize READ defaultSystemButtonIconSize CONSTANT FINAL)
     Q_PROPERTY(QColor defaultSystemButtonBackgroundColor READ defaultSystemButtonBackgroundColor CONSTANT FINAL)
     Q_PROPERTY(QColor defaultSystemCloseButtonBackgroundColor READ defaultSystemCloseButtonBackgroundColor CONSTANT FINAL)
+    Q_PROPERTY(bool blurBehindWindowSupported READ blurBehindWindowSupported CONSTANT FINAL)
 
 public:
     explicit FramelessQuickUtils(QObject *parent = nullptr);
@@ -66,6 +65,7 @@ public:
     Q_NODISCARD bool frameBorderVisible() const;
     Q_NODISCARD qreal frameBorderThickness() const;
     Q_NODISCARD QuickGlobal::SystemTheme systemTheme() const;
+    void setOverrideTheme(const QuickGlobal::SystemTheme theme);
     Q_NODISCARD QColor systemAccentColor() const;
     Q_NODISCARD bool titleBarColorized() const;
     Q_NODISCARD QColor defaultSystemLightColor() const;
@@ -74,9 +74,14 @@ public:
     Q_NODISCARD QSizeF defaultSystemButtonIconSize() const;
     Q_NODISCARD QColor defaultSystemButtonBackgroundColor() const;
     Q_NODISCARD QColor defaultSystemCloseButtonBackgroundColor() const;
+    Q_NODISCARD bool blurBehindWindowSupported() const;
 
-    Q_NODISCARD Q_INVOKABLE QColor getSystemButtonBackgroundColor(
+    Q_NODISCARD Q_SLOT QColor getSystemButtonBackgroundColor(
         const QuickGlobal::SystemButtonType button, const QuickGlobal::ButtonState state);
+
+protected:
+    void classBegin() override;
+    void componentComplete() override;
 
 Q_SIGNALS:
     void systemThemeChanged();
@@ -85,5 +90,3 @@ Q_SIGNALS:
 };
 
 FRAMELESSHELPER_END_NAMESPACE
-
-QML_DECLARE_TYPE(FRAMELESSHELPER_PREPEND_NAMESPACE(FramelessQuickUtils))

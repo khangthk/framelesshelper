@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (C) 2022 by wangwenx190 (Yuhang Zhao)
+ * Copyright (C) 2021-2023 by wangwenx190 (Yuhang Zhao)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,40 +24,116 @@
 
 #include "framelessmanager.h"
 #include "framelessmanager_p.h"
-#include <QtCore/qmutex.h>
-#include <QtGui/qguiapplication.h>
-#include <QtGui/qscreen.h>
-#include <QtGui/qwindow.h>
-#include "framelesshelper_qt.h"
+#include "framelesshelpercore_global_p.h"
+#if FRAMELESSHELPER_CONFIG(native_impl)
+#  ifdef Q_OS_WINDOWS
+#    include "framelesshelper_win.h"
+#  elif (defined(Q_OS_LINUX) && !defined(Q_OS_ANDROID))
+#  elif defined(Q_OS_MACOS)
+#  else
+#  endif
+#else
+#  include "framelesshelper_qt.h"
+#endif
 #include "framelessconfig_p.h"
 #include "utils.h"
 #ifdef Q_OS_WINDOWS
-#  include "framelesshelper_win.h"
+#  include "winverhelper_p.h"
 #endif
+#include <QtCore/qvariant.h>
+#include <QtCore/qcoreapplication.h>
+#include <QtCore/qloggingcategory.h>
+#include <QtGui/qfontdatabase.h>
+#include <QtGui/qwindow.h>
+#if (QT_VERSION >= QT_VERSION_CHECK(6, 5, 0))
+#  include <QtGui/qguiapplication.h>
+#  include <QtGui/qstylehints.h>
+#endif // (QT_VERSION >= QT_VERSION_CHECK(6, 5, 0))
 
 FRAMELESSHELPER_BEGIN_NAMESPACE
 
+#if FRAMELESSHELPER_CONFIG(debug_output)
+[[maybe_unused]] static Q_LOGGING_CATEGORY(lcFramelessManager, "wangwenx190.framelesshelper.core.framelessmanager")
+#  define INFO qCInfo(lcFramelessManager)
+#  define DEBUG qCDebug(lcFramelessManager)
+#  define WARNING qCWarning(lcFramelessManager)
+#  define CRITICAL qCCritical(lcFramelessManager)
+#else
+#  define INFO QT_NO_QDEBUG_MACRO()
+#  define DEBUG QT_NO_QDEBUG_MACRO()
+#  define WARNING QT_NO_QDEBUG_MACRO()
+#  define CRITICAL QT_NO_QDEBUG_MACRO()
+#endif
+
 using namespace Global;
 
-struct FramelessManagerHelper
+static constexpr const int kEventDelayInterval = 1000;
+
+struct InternalData
 {
-    QMutex mutex;
-    QList<WId> windowIds = {};
+    FramelessDataHash dataMap = {};
+    QHash<WId, QObject *> windowMap = {};
+
+    InternalData();
+    ~InternalData();
+
+private:
+    FRAMELESSHELPER_CLASS(InternalData)
 };
 
-Q_GLOBAL_STATIC(FramelessManagerHelper, g_helper)
+InternalData::InternalData() = default;
 
-Q_GLOBAL_STATIC(FramelessManager, g_manager)
+InternalData::~InternalData() = default;
 
-#ifdef Q_OS_LINUX
-static constexpr const char QT_QPA_ENV_VAR[] = "QT_QPA_PLATFORM";
-FRAMELESSHELPER_BYTEARRAY_CONSTANT(xcb)
+Q_GLOBAL_STATIC(InternalData, g_internalData)
+
+#if FRAMELESSHELPER_CONFIG(bundle_resource)
+[[nodiscard]] static inline QString iconFontFamilyName()
+{
+    static const auto result = []() -> QString {
+#ifdef Q_OS_WINDOWS
+        if (WindowsVersionHelper::isWin11OrGreater()) {
+            return FRAMELESSHELPER_STRING_LITERAL("Segoe Fluent Icons");
+        }
+        if (WindowsVersionHelper::isWin10OrGreater()) {
+            return FRAMELESSHELPER_STRING_LITERAL("Segoe MDL2 Assets");
+        }
+#endif // Q_OS_WINDOWS
+        return FRAMELESSHELPER_STRING_LITERAL("iconfont");
+    }();
+    return result;
+}
 #endif
 
-#ifdef Q_OS_MACOS
-static constexpr const char MAC_LAYER_ENV_VAR[] = "QT_MAC_WANTS_LAYER";
-FRAMELESSHELPER_BYTEARRAY_CONSTANT2(ValueOne, "1")
-#endif
+InternalEventFilter::InternalEventFilter(const QObject *window, QObject *parent) : QObject(parent), m_window(window)
+{
+    Q_ASSERT(m_window);
+    Q_ASSERT(m_window->isWidgetType() || m_window->isWindowType());
+}
+
+InternalEventFilter::~InternalEventFilter() = default;
+
+bool InternalEventFilter::eventFilter(QObject *object, QEvent *event)
+{
+    Q_ASSERT(object);
+    Q_ASSERT(event);
+    Q_ASSERT(m_window);
+    if (!object || !event || !m_window || (object != m_window)) {
+        return false;
+    }
+    const FramelessDataPtr data = FramelessManagerPrivate::getData(m_window);
+    if (!data || !data->frameless || !data->callbacks) {
+        return false;
+    }
+    if (event->type() == QEvent::WinIdChange) {
+        const WId windowId = data->callbacks->getWindowId();
+        Q_ASSERT(windowId);
+        if (windowId) {
+            FramelessManagerPrivate::updateWindowId(m_window, windowId);
+        }
+    }
+    return false;
+}
 
 FramelessManagerPrivate::FramelessManagerPrivate(FramelessManager *q) : QObject(q)
 {
@@ -89,117 +165,243 @@ const FramelessManagerPrivate *FramelessManagerPrivate::get(const FramelessManag
     return pub->d_func();
 }
 
-SystemTheme FramelessManagerPrivate::systemTheme() const
+void FramelessManagerPrivate::initializeIconFont()
 {
-    return m_systemTheme;
-}
-
-QColor FramelessManagerPrivate::systemAccentColor() const
-{
-    return m_accentColor;
-}
-
-void FramelessManagerPrivate::addWindow(const SystemParameters &params)
-{
-    Q_ASSERT(params.isValid());
-    if (!params.isValid()) {
+#if FRAMELESSHELPER_CONFIG(bundle_resource)
+    static bool inited = false;
+    if (inited) {
         return;
     }
-    const WId windowId = params.getWindowId();
-    g_helper()->mutex.lock();
-    if (g_helper()->windowIds.contains(windowId)) {
-        g_helper()->mutex.unlock();
-        return;
+    inited = true;
+    FramelessHelperCoreInitResource();
+    // We always register this font because it's our only fallback.
+    const int id = QFontDatabase::addApplicationFont(FRAMELESSHELPER_STRING_LITERAL(":/org.wangwenx190.FramelessHelper/resources/fonts/iconfont.ttf"));
+    if (id < 0) {
+        WARNING << "Failed to load icon font.";
+    } else {
+        DEBUG << "Successfully registered icon font.";
     }
-    g_helper()->windowIds.append(windowId);
-    g_helper()->mutex.unlock();
-    static const bool pureQt = []() -> bool {
-#ifdef Q_OS_WINDOWS
-        return FramelessConfig::instance()->isSet(Option::UseCrossPlatformQtImplementation);
-#else
-        return true;
-#endif
+#endif // FRAMELESSHELPER_CORE_NO_BUNDLE_RESOURCE
+}
+
+QFont FramelessManagerPrivate::getIconFont()
+{
+#if FRAMELESSHELPER_CONFIG(bundle_resource)
+    static const auto font = []() -> QFont {
+        QFont f = {};
+        f.setFamily(iconFontFamilyName());
+#  ifdef Q_OS_MACOS
+        f.setPointSize(10);
+#  else // !Q_OS_MACOS
+        f.setPointSize(8);
+#  endif // Q_OS_MACOS
+        return f;
     }();
-#ifdef Q_OS_WINDOWS
-    if (!pureQt) {
-        // Work-around Win32 multi-monitor artifacts.
-        QWindow * const window = params.getWindowHandle();
-        Q_ASSERT(window);
-        connect(window, &QWindow::screenChanged, window, [windowId, window](QScreen *screen){
-            Q_UNUSED(screen);
-            // Force a WM_NCCALCSIZE event to inform Windows about our custom window frame,
-            // this is only necessary when the window is being moved cross monitors.
-            Utils::triggerFrameChange(windowId);
-            // For some reason the window is not repainted correctly when moving cross monitors,
-            // we workaround this issue by force a re-paint and re-layout of the window by triggering
-            // a resize event manually. Although the actual size does not change, the issue we
-            // observed disappeared indeed, amazingly.
-            window->resize(window->size());
-        });
-    }
-#endif
-    if (pureQt) {
-        FramelessHelperQt::addWindow(params);
-    }
-#ifdef Q_OS_WINDOWS
-    if (!pureQt) {
-        FramelessHelperWin::addWindow(params);
-    }
-    Utils::installSystemMenuHook(windowId, params.isWindowFixedSize,
-        params.isInsideTitleBarDraggableArea, params.getWindowDevicePixelRatio);
-#endif
+    return font;
+#else // !FRAMELESSHELPER_CONFIG(bundle_resource)
+    return {};
+#endif // FRAMELESSHELPER_CONFIG(bundle_resource)
 }
 
 void FramelessManagerPrivate::notifySystemThemeHasChangedOrNot()
 {
-    Q_Q(FramelessManager);
-    const SystemTheme currentSystemTheme = Utils::getSystemTheme();
+    themeTimer.start();
+}
+
+void FramelessManagerPrivate::notifyWallpaperHasChangedOrNot()
+{
+    wallpaperTimer.start();
+}
+
+void FramelessManagerPrivate::doNotifySystemThemeHasChangedOrNot()
+{
+    const SystemTheme currentSystemTheme = (Utils::shouldAppsUseDarkMode() ? SystemTheme::Dark : SystemTheme::Light);
+    const QColor currentAccentColor = Utils::getAccentColor();
 #ifdef Q_OS_WINDOWS
     const DwmColorizationArea currentColorizationArea = Utils::getDwmColorizationArea();
-    const QColor currentAccentColor = Utils::getDwmColorizationColor();
-#endif
-#ifdef Q_OS_LINUX
-    const QColor currentAccentColor = Utils::getWmThemeColor();
-#endif
-#ifdef Q_OS_MACOS
-    const QColor currentAccentColor = Utils::getControlsAccentColor();
 #endif
     bool notify = false;
-    if (m_systemTheme != currentSystemTheme) {
-        m_systemTheme = currentSystemTheme;
+    if (systemTheme != currentSystemTheme) {
+        systemTheme = currentSystemTheme;
         notify = true;
     }
-    if (m_accentColor != currentAccentColor) {
-        m_accentColor = currentAccentColor;
+    if (accentColor != currentAccentColor) {
+        accentColor = currentAccentColor;
         notify = true;
     }
 #ifdef Q_OS_WINDOWS
-    if (m_colorizationArea != currentColorizationArea) {
-        m_colorizationArea = currentColorizationArea;
+    if (colorizationArea != currentColorizationArea) {
+        colorizationArea = currentColorizationArea;
         notify = true;
     }
 #endif
-    if (notify) {
+    // Don't emit the signal if the user has overrided the global theme.
+    if (notify && !isThemeOverrided()) {
+        Q_Q(FramelessManager);
         Q_EMIT q->systemThemeChanged();
+        DEBUG.nospace() << "System theme changed. Current theme: " << systemTheme
+                        << ", accent color: " << accentColor.name(QColor::HexArgb).toUpper()
+#ifdef Q_OS_WINDOWS
+                        << ", colorization area: " << colorizationArea
+#endif
+                        << '.';
     }
+}
+
+void FramelessManagerPrivate::doNotifyWallpaperHasChangedOrNot()
+{
+    const QString currentWallpaper = Utils::getWallpaperFilePath();
+    const WallpaperAspectStyle currentWallpaperAspectStyle = Utils::getWallpaperAspectStyle();
+    bool notify = false;
+    if (wallpaper != currentWallpaper) {
+        wallpaper = currentWallpaper;
+        notify = true;
+    }
+    if (wallpaperAspectStyle != currentWallpaperAspectStyle) {
+        wallpaperAspectStyle = currentWallpaperAspectStyle;
+        notify = true;
+    }
+    if (notify) {
+        Q_Q(FramelessManager);
+        Q_EMIT q->wallpaperChanged();
+        DEBUG.nospace() << "Wallpaper changed. Current wallpaper: " << wallpaper
+                        << ", aspect style: " << wallpaperAspectStyle << '.';
+    }
+}
+
+FramelessDataPtr FramelessManagerPrivate::getData(const QObject *window)
+{
+    Q_ASSERT(window);
+    Q_ASSERT(window->isWidgetType() || window->isWindowType());
+    if (!window || !(window->isWidgetType() || window->isWindowType())) {
+        return nullptr;
+    }
+    return g_internalData()->dataMap.value(const_cast<QObject *>(window));
+}
+
+FramelessDataPtr FramelessManagerPrivate::createData(const QObject *window, const WId windowId)
+{
+    Q_ASSERT(window);
+    Q_ASSERT(window->isWidgetType() || window->isWindowType());
+    Q_ASSERT(windowId);
+    if (!window || !(window->isWidgetType() || window->isWindowType()) || !windowId) {
+        return nullptr;
+    }
+    const auto win = const_cast<QObject *>(window);
+    auto it = g_internalData()->dataMap.find(win);
+    if (it == g_internalData()->dataMap.end()) {
+        FramelessDataPtr data = FramelessData::create();
+        data->window = win;
+        data->windowId = windowId;
+        it = g_internalData()->dataMap.insert(win, data);
+        g_internalData()->windowMap.insert(windowId, win);
+    }
+    return it.value();
+}
+
+WId FramelessManagerPrivate::getWindowId(const QObject *window)
+{
+    Q_ASSERT(window);
+    Q_ASSERT(window->isWidgetType() || window->isWindowType());
+    if (!window || !(window->isWidgetType() || window->isWindowType())) {
+        return 0;
+    }
+    if (const FramelessDataPtr data = getData(window)) {
+        return data->windowId;
+    }
+    return 0;
+}
+
+QObject *FramelessManagerPrivate::getWindow(const WId windowId)
+{
+    Q_ASSERT(windowId);
+    if (!windowId) {
+        return nullptr;
+    }
+    return g_internalData()->windowMap.value(windowId);
+}
+
+void FramelessManagerPrivate::updateWindowId(const QObject *window, const WId newWindowId)
+{
+    Q_ASSERT(window);
+    Q_ASSERT(window->isWidgetType() || window->isWindowType());
+    Q_ASSERT(newWindowId);
+    if (!window || !(window->isWidgetType() || window->isWindowType()) || !newWindowId) {
+        return;
+    }
+    const auto win = const_cast<QObject *>(window);
+    const FramelessDataPtr data = g_internalData()->dataMap.value(win);
+    Q_ASSERT(data);
+    if (!data) {
+        return;
+    }
+    const WId oldWindowId = data->windowId;
+    data->windowId = newWindowId;
+    g_internalData()->windowMap.remove(oldWindowId);
+    g_internalData()->windowMap.insert(newWindowId, win);
+    data->frameless = false;
+    std::ignore = FramelessManager::instance()->addWindow(window, newWindowId);
+}
+
+bool FramelessManagerPrivate::isThemeOverrided() const
+{
+    return (overrideTheme.value_or(SystemTheme::Unknown) != SystemTheme::Unknown);
 }
 
 void FramelessManagerPrivate::initialize()
 {
-    m_systemTheme = Utils::getSystemTheme();
+    themeTimer.setInterval(kEventDelayInterval);
+    themeTimer.callOnTimeout(this, [this](){
+        themeTimer.stop();
+        doNotifySystemThemeHasChangedOrNot();
+    });
+    wallpaperTimer.setInterval(kEventDelayInterval);
+    wallpaperTimer.callOnTimeout(this, [this](){
+        wallpaperTimer.stop();
+        doNotifyWallpaperHasChangedOrNot();
+    });
+    systemTheme = (Utils::shouldAppsUseDarkMode() ? SystemTheme::Dark : SystemTheme::Light);
+    accentColor = Utils::getAccentColor();
 #ifdef Q_OS_WINDOWS
-    m_colorizationArea = Utils::getDwmColorizationArea();
-    m_accentColor = Utils::getDwmColorizationColor();
+    colorizationArea = Utils::getDwmColorizationArea();
 #endif
-#ifdef Q_OS_LINUX
-    m_accentColor = Utils::getWmThemeColor();
+    wallpaper = Utils::getWallpaperFilePath();
+    wallpaperAspectStyle = Utils::getWallpaperAspectStyle();
+    DEBUG.nospace() << "Current system theme: " << systemTheme
+                    << ", accent color: " << accentColor.name(QColor::HexArgb).toUpper()
+#ifdef Q_OS_WINDOWS
+                    << ", colorization area: " << colorizationArea
 #endif
-#ifdef Q_OS_MACOS
-    m_accentColor = Utils::getControlsAccentColor();
-#endif
+                    << ", wallpaper: " << wallpaper
+                    << ", aspect style: " << wallpaperAspectStyle
+                    << '.';
+    // We are doing some tricks in our Windows message handling code, so
+    // we don't use Qt's theme notifier on Windows. But for other platforms
+    // we want to use as many Qt functionalities as possible.
+#if ((QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)) && !FRAMELESSHELPER_CONFIG(native_impl))
+    QStyleHints *styleHints = QGuiApplication::styleHints();
+    Q_ASSERT(styleHints);
+    if (styleHints) {
+        connect(styleHints, &QStyleHints::colorSchemeChanged, this, [this](const Qt::ColorScheme colorScheme){
+            Q_UNUSED(colorScheme);
+            notifySystemThemeHasChangedOrNot();
+        });
+    }
+#endif // ((QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)) && !defined(Q_OS_WINDOWS))
+    static bool flagSet = false;
+    if (!flagSet) {
+        flagSet = true;
+        // Set a global flag so that people can check whether FramelessHelper is being
+        // used without actually accessing the FramelessHelper interface.
+        static constexpr const char flag[] = "__FRAMELESSHELPER__";
+        const auto ver = quint64(FramelessHelperVersion().version.num);
+        qputenv(flag, QByteArray::number(ver));
+        qApp->setProperty(flag, ver);
+    }
 }
 
-FramelessManager::FramelessManager(QObject *parent) : QObject(parent), d_ptr(new FramelessManagerPrivate(this))
+FramelessManager::FramelessManager(QObject *parent) :
+    QObject(parent), d_ptr(std::make_unique<FramelessManagerPrivate>(this))
 {
 }
 
@@ -207,91 +409,126 @@ FramelessManager::~FramelessManager() = default;
 
 FramelessManager *FramelessManager::instance()
 {
-    return g_manager();
+    static FramelessManager manager;
+    return &manager;
 }
 
 SystemTheme FramelessManager::systemTheme() const
 {
     Q_D(const FramelessManager);
-    return d->systemTheme();
+    // The user's choice has top priority.
+    if (d->isThemeOverrided()) {
+        return d->overrideTheme.value();
+    }
+    return d->systemTheme;
 }
 
 QColor FramelessManager::systemAccentColor() const
 {
     Q_D(const FramelessManager);
-    return d->systemAccentColor();
+    return d->accentColor;
 }
 
-void FramelessManager::addWindow(const SystemParameters &params)
+QString FramelessManager::wallpaper() const
+{
+    Q_D(const FramelessManager);
+    return d->wallpaper;
+}
+
+WallpaperAspectStyle FramelessManager::wallpaperAspectStyle() const
+{
+    Q_D(const FramelessManager);
+    return d->wallpaperAspectStyle;
+}
+
+void FramelessManager::setOverrideTheme(const SystemTheme theme)
 {
     Q_D(FramelessManager);
-    d->addWindow(params);
-}
-
-void FramelessHelper::Core::initialize()
-{
-    static bool inited = false;
-    if (inited) {
+    if ((!d->overrideTheme.has_value() && (theme == SystemTheme::Unknown))
+        || (d->overrideTheme.has_value() && (d->overrideTheme.value() == theme))) {
         return;
     }
-    inited = true;
-#ifdef Q_OS_LINUX
-    // Qt's Wayland experience is not good, so we force the XCB backend here.
-    // TODO: Remove this hack once Qt's Wayland implementation is good enough.
-    // We are setting the preferred QPA backend, so we have to set it early
-    // enough, that is, before the construction of any Q(Gui)Application
-    // instances. QCoreApplication won't instantiate the platform plugin.
-    qputenv(QT_QPA_ENV_VAR, kxcb);
-#endif
-#ifdef Q_OS_MACOS
-    // This has become the default setting since some unknown Qt version,
-    // check whether we can remove this hack safely or not.
-    qputenv(MAC_LAYER_ENV_VAR, kValueOne);
-#endif
-#ifdef Q_OS_WINDOWS
-    // This is equivalent to set the "dpiAware" and "dpiAwareness" field in
-    // your manifest file. It works through out Windows Vista to Windows 11.
-    // It's highly recommended to enable the highest DPI awareness level
-    // (currently it's PerMonitor Version 2, or PMv2 for short) for any GUI
-    // applications, to allow your user interface scale to an appropriate
-    // size and still stay sharp, though you will have to do the calculation
-    // and resize by yourself.
-    Utils::tryToEnableHighestDpiAwarenessLevel();
-#endif
-    // This attribute is known to be __NOT__ compatible with QGLWidget.
-    // Please consider migrating to the recommended QOpenGLWidget instead.
-    QCoreApplication::setAttribute(Qt::AA_DontCreateNativeWidgetSiblings);
-#if (QT_VERSION < QT_VERSION_CHECK(6, 0, 0))
-    // Enable high DPI scaling by default, but only for Qt5 applications,
-    // because this has become the default setting since Qt6 and it can't
-    // be changed from outside anymore (except for internal testing purposes).
-    QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
-    QCoreApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
-#endif
-#if (QT_VERSION >= QT_VERSION_CHECK(5, 14, 0))
-    // Non-integer scale factors will cause Qt have some painting defects
-    // for both Qt Widgets and Qt Quick applications, and it's still not
-    // totally fixed till now (Qt 6.4), so we round the scale factors to
-    // get a better looking. Non-integer scale factors will also cause
-    // flicker and jitter during window resizing.
-    QGuiApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::Round);
-#endif
-    qRegisterMetaType<Option>();
-    qRegisterMetaType<SystemTheme>();
-    qRegisterMetaType<SystemButtonType>();
-    qRegisterMetaType<ResourceType>();
-    qRegisterMetaType<DwmColorizationArea>();
-    qRegisterMetaType<Anchor>();
-    qRegisterMetaType<ButtonState>();
-    qRegisterMetaType<WindowsVersion>();
-    qRegisterMetaType<ApplicationType>();
-    qRegisterMetaType<VersionNumber>();
-    qRegisterMetaType<SystemParameters>();
+    if (theme == SystemTheme::Unknown) {
+        d->overrideTheme = std::nullopt;
+    } else {
+        d->overrideTheme = theme;
+    }
+    Q_EMIT systemThemeChanged();
 }
 
-int FramelessHelper::Core::version()
+bool FramelessManager::addWindow(const QObject *window, const WId windowId)
 {
-    return FRAMELESSHELPER_VERSION;
+    Q_ASSERT(window);
+    Q_ASSERT(window->isWidgetType() || window->isWindowType());
+    Q_ASSERT(windowId);
+    if (!window || !(window->isWidgetType() || window->isWindowType()) || !windowId) {
+        return false;
+    }
+    FramelessDataPtr data = FramelessManagerPrivate::getData(window);
+    if (data && data->frameless) {
+        return false;
+    }
+    if (!data) {
+        data = FramelessData::create();
+        data->window = const_cast<QObject *>(window);
+        data->windowId = windowId;
+        g_internalData()->dataMap.insert(data->window, data);
+        g_internalData()->windowMap.insert(windowId, data->window);
+    }
+#if FRAMELESSHELPER_CONFIG(native_impl)
+#  ifdef Q_OS_WINDOWS
+    std::ignore = Utils::installWindowProcHook(windowId);
+    FramelessHelperWin::addWindow(window);
+#  elif (defined(Q_OS_LINUX) && !defined(Q_OS_ANDROID))
+#  elif defined(Q_OS_MACOS)
+#  else
+#  endif
+#else
+    FramelessHelperQt::addWindow(window);
+#endif
+    if (!data->internalEventHandler) {
+        data->internalEventHandler = new InternalEventFilter(data->window, data->window);
+        data->window->installEventFilter(data->internalEventHandler);
+    }
+    return true;
+}
+
+bool FramelessManager::removeWindow(const QObject *window)
+{
+    Q_ASSERT(window);
+    if (!window) {
+        return false;
+    }
+    const auto it = g_internalData()->dataMap.constFind(const_cast<QObject *>(window));
+    if (it == g_internalData()->dataMap.constEnd()) {
+        return false;
+    }
+    const FramelessDataPtr data = it.value();
+    Q_ASSERT(data);
+    Q_ASSERT(data->window);
+    Q_ASSERT(data->windowId);
+    if (!data || !data->window || !data->windowId) {
+        return false;
+    }
+    if (data->internalEventHandler) {
+        data->window->removeEventFilter(data->internalEventHandler);
+        delete data->internalEventHandler;
+        data->internalEventHandler = nullptr;
+    }
+#if FRAMELESSHELPER_CONFIG(native_impl)
+#  ifdef Q_OS_WINDOWS
+    FramelessHelperWin::removeWindow(window);
+    std::ignore = Utils::uninstallWindowProcHook(data->windowId);
+#  elif (defined(Q_OS_LINUX) && !defined(Q_OS_ANDROID))
+#  elif defined(Q_OS_MACOS)
+#  else
+#  endif
+#else
+    FramelessHelperQt::removeWindow(window);
+#endif
+    g_internalData()->dataMap.erase(it);
+    g_internalData()->windowMap.remove(data->windowId);
+    return true;
 }
 
 FRAMELESSHELPER_END_NAMESPACE

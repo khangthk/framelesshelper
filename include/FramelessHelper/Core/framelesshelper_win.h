@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (C) 2022 by wangwenx190 (Yuhang Zhao)
+ * Copyright (C) 2021-2023 by wangwenx190 (Yuhang Zhao)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,22 +24,31 @@
 
 #pragma once
 
-#include "framelesshelpercore_global.h"
+#include <FramelessHelper/Core/framelesshelpercore_global.h>
 #include <QtCore/qabstractnativeeventfilter.h>
+
+#ifdef Q_OS_WINDOWS
+
+#if FRAMELESSHELPER_CONFIG(native_impl)
 
 FRAMELESSHELPER_BEGIN_NAMESPACE
 
 class FRAMELESSHELPER_CORE_API FramelessHelperWin : public QAbstractNativeEventFilter
 {
-    Q_DISABLE_COPY_MOVE(FramelessHelperWin)
+    FRAMELESSHELPER_CLASS(FramelessHelperWin)
 
 public:
     explicit FramelessHelperWin();
     ~FramelessHelperWin() override;
 
-    static void addWindow(const Global::SystemParameters &params);
+    static void addWindow(const QObject *window);
+    static void removeWindow(const QObject *window);
 
     Q_NODISCARD bool nativeEventFilter(const QByteArray &eventType, void *message, QT_NATIVE_EVENT_RESULT_TYPE *result) override;
 };
 
 FRAMELESSHELPER_END_NAMESPACE
+
+#endif // native_impl
+
+#endif // Q_OS_WINDOWS

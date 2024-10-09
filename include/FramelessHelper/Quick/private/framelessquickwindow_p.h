@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (C) 2022 by wangwenx190 (Yuhang Zhao)
+ * Copyright (C) 2021-2023 by wangwenx190 (Yuhang Zhao)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,31 +24,28 @@
 
 #pragma once
 
-#include "framelesshelperquick_global.h"
-#if (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
-#include <QtQuick/qquickwindow.h>
+#include <FramelessHelper/Quick/framelesshelperquick_global.h>
+#include <memory>
 
-Q_MOC_INCLUDE("framelessquickwindow_p_p.h")
+#if (FRAMELESSHELPER_CONFIG(private_qt) && FRAMELESSHELPER_CONFIG(window))
+
+#include <QtQuick/private/qquickwindowmodule_p.h>
 
 FRAMELESSHELPER_BEGIN_NAMESPACE
 
 class FramelessQuickWindowPrivate;
-
-class FRAMELESSHELPER_QUICK_API FramelessQuickWindow : public QQuickWindow
+class FRAMELESSHELPER_QUICK_API FramelessQuickWindow : public QQuickWindowQmlImpl
 {
-    Q_OBJECT
+    FRAMELESSHELPER_PUBLIC_QT_CLASS(FramelessQuickWindow)
 #ifdef QML_NAMED_ELEMENT
     QML_NAMED_ELEMENT(FramelessWindow)
 #endif
-    Q_DECLARE_PRIVATE(FramelessQuickWindow)
-    Q_DISABLE_COPY_MOVE(FramelessQuickWindow)
     Q_PROPERTY(bool hidden READ isHidden NOTIFY hiddenChanged FINAL)
     Q_PROPERTY(bool normal READ isNormal NOTIFY normalChanged FINAL)
     Q_PROPERTY(bool minimized READ isMinimized NOTIFY minimizedChanged FINAL)
     Q_PROPERTY(bool maximized READ isMaximized NOTIFY maximizedChanged FINAL)
     Q_PROPERTY(bool zoomed READ isZoomed NOTIFY zoomedChanged FINAL)
     Q_PROPERTY(bool fullScreen READ isFullScreen NOTIFY fullScreenChanged FINAL)
-    Q_PRIVATE_PROPERTY(FramelessQuickWindow::d_func(), QQuickAnchorLine topBorderBottom READ getTopBorderBottom CONSTANT FINAL)
 
 public:
     explicit FramelessQuickWindow(QWindow *parent = nullptr);
@@ -66,6 +63,10 @@ public Q_SLOTS:
     void toggleMaximized();
     void toggleFullScreen();
 
+protected:
+    void classBegin() override;
+    void componentComplete() override;
+
 Q_SIGNALS:
     void hiddenChanged();
     void normalChanged();
@@ -73,12 +74,8 @@ Q_SIGNALS:
     void maximizedChanged();
     void zoomedChanged();
     void fullScreenChanged();
-
-private:
-    QScopedPointer<FramelessQuickWindowPrivate> d_ptr;
 };
 
 FRAMELESSHELPER_END_NAMESPACE
 
-QML_DECLARE_TYPE(FRAMELESSHELPER_PREPEND_NAMESPACE(FramelessQuickWindow))
 #endif

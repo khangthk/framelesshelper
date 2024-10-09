@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (C) 2022 by wangwenx190 (Yuhang Zhao)
+ * Copyright (C) 2021-2023 by wangwenx190 (Yuhang Zhao)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,7 +24,7 @@
 
 #pragma once
 
-#include "framelesshelperquick_global.h"
+#include <FramelessHelper/Quick/framelesshelperquick_global.h>
 
 QT_BEGIN_NAMESPACE
 class QQmlEngine;
@@ -34,7 +34,7 @@ FRAMELESSHELPER_BEGIN_NAMESPACE
 
 namespace FramelessHelper::Quick
 {
-FRAMELESSHELPER_QUICK_API void registerTypes(QQmlEngine *engine);
+inline void registerTypes(QQmlEngine *engine) { FramelessHelperQuickRegisterTypes(engine); }
 } // namespace FramelessHelper::Quick
 
 FRAMELESSHELPER_END_NAMESPACE

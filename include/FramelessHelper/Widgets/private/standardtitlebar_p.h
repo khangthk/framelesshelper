@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (C) 2022 by wangwenx190 (Yuhang Zhao)
+ * Copyright (C) 2021-2023 by wangwenx190 (Yuhang Zhao)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,69 +24,76 @@
 
 #pragma once
 
-#include "framelesshelperwidgets_global.h"
-#include <QtCore/qobject.h>
-#include <QtCore/qpointer.h>
+#include <FramelessHelper/Widgets/framelesshelperwidgets_global.h>
+#include <QtGui/qfont.h>
+#include <optional>
 
 QT_BEGIN_NAMESPACE
-class QLabel;
-class QSpacerItem;
+class QMouseEvent;
 QT_END_NAMESPACE
+
+#if FRAMELESSHELPER_CONFIG(titlebar)
 
 FRAMELESSHELPER_BEGIN_NAMESPACE
 
-class StandardTitleBar;
+#if FRAMELESSHELPER_CONFIG(system_button)
 class StandardSystemButton;
+#endif
+class ChromePalette;
 
+class StandardTitleBar;
 class FRAMELESSHELPER_WIDGETS_API StandardTitleBarPrivate : public QObject
 {
-    Q_OBJECT
-    Q_DECLARE_PUBLIC(StandardTitleBar)
-    Q_DISABLE_COPY_MOVE(StandardTitleBarPrivate)
+    FRAMELESSHELPER_PRIVATE_QT_CLASS(StandardTitleBar)
 
 public:
+    struct FontMetrics
+    {
+        int width = 0;
+        int height = 0;
+        int ascent = 0;
+    };
+
     explicit StandardTitleBarPrivate(StandardTitleBar *q);
     ~StandardTitleBarPrivate() override;
 
-    Q_NODISCARD static StandardTitleBarPrivate *get(StandardTitleBar *pub);
-    Q_NODISCARD static const StandardTitleBarPrivate *get(const StandardTitleBar *pub);
+    Q_NODISCARD QRect windowIconRect() const;
+    Q_NODISCARD bool windowIconVisible_real() const;
+    Q_NODISCARD bool isInTitleBarIconArea(const QPoint &pos) const;
 
-    Q_NODISCARD Qt::Alignment titleLabelAlignment() const;
-    void setTitleLabelAlignment(const Qt::Alignment value);
+    Q_NODISCARD QFont defaultFont() const;
+    Q_NODISCARD FontMetrics titleLabelSize() const;
+    Q_NODISCARD int titleLabelMaxWidth() const;
 
-    Q_NODISCARD bool isExtended() const;
-    void setExtended(const bool value);
+    Q_SLOT void updateMaximizeButton();
+    Q_SLOT void updateTitleBarColor();
+    Q_SLOT void updateChromeButtonColor();
+    Q_SLOT void retranslateUi();
 
-    Q_NODISCARD bool isUsingAlternativeBackground() const;
-    void setUseAlternativeBackground(const bool value);
+    Q_NODISCARD bool mouseEventHandler(QMouseEvent *event);
 
-    Q_NODISCARD bool isHideWhenClose() const;
-    void setHideWhenClose(const bool value);
-
-public Q_SLOTS:
-    void updateMaximizeButton();
-    void updateTitleBarStyleSheet();
-    void retranslateUi();
-
-protected:
-    Q_NODISCARD bool eventFilter(QObject *object, QEvent *event) override;
-
-private:
     void initialize();
 
-private:
-    StandardTitleBar *q_ptr = nullptr;
-    QScopedPointer<QLabel> m_windowTitleLabel;
-    QScopedPointer<StandardSystemButton> m_minimizeButton;
-    QScopedPointer<StandardSystemButton> m_maximizeButton;
-    QScopedPointer<StandardSystemButton> m_closeButton;
-    QPointer<QWidget> m_window = nullptr;
-    bool m_extended = false;
-    Qt::Alignment m_labelAlignment = {};
-    QSpacerItem *m_labelLeftStretch = nullptr;
-    QSpacerItem *m_labelRightStretch = nullptr;
-    bool m_useAlternativeBackground = false;
-    bool m_hideWhenClose = false;
+#if (!defined(Q_OS_MACOS) && FRAMELESSHELPER_CONFIG(system_button))
+    StandardSystemButton *minimizeButton = nullptr;
+    StandardSystemButton *maximizeButton = nullptr;
+    StandardSystemButton *closeButton = nullptr;
+#endif
+    QPointer<QWidget> window; // Initializing it with nullptr causes compilation errors on MinGW toolchain and old Qt versions (< 5.15).
+    bool extended = false;
+    Qt::Alignment labelAlignment = {};
+    bool hideWhenClose = false;
+    ChromePalette *chromePalette = nullptr;
+    bool titleLabelVisible = true;
+    std::optional<QSize> windowIconSize = std::nullopt;
+    bool windowIconVisible = false;
+    std::optional<QFont> titleFont = std::nullopt;
+    bool closeTriggered = false;
+
+protected:
+    bool eventFilter(QObject *object, QEvent *event) override;
 };
 
 FRAMELESSHELPER_END_NAMESPACE
+
+#endif

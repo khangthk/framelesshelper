@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (C) 2022 by wangwenx190 (Yuhang Zhao)
+ * Copyright (C) 2021-2023 by wangwenx190 (Yuhang Zhao)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,7 +24,7 @@
 
 #pragma once
 
-#include <FramelessWidget>
+#include <FramelessHelper/Widgets/framelesswidget.h>
 
 FRAMELESSHELPER_BEGIN_NAMESPACE
 class StandardTitleBar;
@@ -35,11 +35,13 @@ class GLWidget;
 class MainWindow : public FRAMELESSHELPER_PREPEND_NAMESPACE(FramelessWidget)
 {
     Q_OBJECT
-    Q_DISABLE_COPY_MOVE(MainWindow)
+    Q_DISABLE_COPY(MainWindow)
 
 public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow() override;
+
+    void waitReady();
 
 protected:
     void closeEvent(QCloseEvent *event) override;

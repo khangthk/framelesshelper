@@ -1,7 +1,7 @@
 #[[
   MIT License
 
-  Copyright (C) 2022 by wangwenx190 (Yuhang Zhao)
+  Copyright (C) 2021-2023 by wangwenx190 (Yuhang Zhao)
 
   Permission is hereby granted, free of charge, to any person obtaining a copy
   of this software and associated documentation files (the "Software"), to deal
@@ -22,15 +22,37 @@
   SOFTWARE.
 ]]
 
-find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS OpenGL)
-find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS OpenGL)
+set(DEMO_NAME FramelessHelperDemo-OpenGLWidget)
 
-if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
-    find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS OpenGLWidgets)
-    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS OpenGLWidgets)
+if(FRAMELESSHELPER_ENABLE_UNIVERSAL_BUILD)
+    set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "" FORCE)
 endif()
 
-set(SOURCES
+if(FRAMELESSHELPER_EXAMPLES_STANDALONE)
+    cmake_minimum_required(VERSION 3.20)
+    project(${DEMO_NAME} VERSION 1.0)
+    include(../../cmake/utils.cmake)
+    setup_project(
+        QT_PROJECT
+        LANGUAGES CXX RC
+        NO_WARNING
+        ENABLE_LTO
+    )
+    find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets OpenGL)
+    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets OpenGL)
+    if(QT_VERSION_MAJOR GREATER_EQUAL 6)
+        find_package(Qt6 REQUIRED COMPONENTS OpenGLWidgets)
+    endif()
+    find_package(FramelessHelper REQUIRED COMPONENTS Core Widgets)
+endif()
+
+add_executable(${DEMO_NAME})
+
+target_sources(${DEMO_NAME} PRIVATE
+    ../shared/log.h
+    ../shared/log.cpp
+    ../shared/settings.h
+    ../shared/settings.cpp
     images.qrc
     logo.h
     logo.cpp
@@ -42,37 +64,66 @@ set(SOURCES
 )
 
 if(WIN32)
-    enable_language(RC)
-    list(APPEND SOURCES ../example.rc ../example.manifest)
-endif()
-
-add_executable(OpenGLWidget ${SOURCES})
-
-set_target_properties(OpenGLWidget PROPERTIES
-    WIN32_EXECUTABLE TRUE
-    MACOSX_BUNDLE TRUE
-    MACOSX_BUNDLE_GUI_IDENTIFIER org.wangwenx190.framelesshelper.demo
-    MACOSX_BUNDLE_BUNDLE_VERSION 1.0.0.0
-    MACOSX_BUNDLE_SHORT_VERSION_STRING 1.0
-)
-
-target_link_libraries(OpenGLWidget PRIVATE
-    Qt${QT_VERSION_MAJOR}::Widgets
-    Qt${QT_VERSION_MAJOR}::OpenGL
-    FramelessHelper::Widgets
-)
-
-if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
-    target_link_libraries(OpenGLWidget PRIVATE
-        Qt${QT_VERSION_MAJOR}::OpenGLWidgets
+    set(__rc_path "${PROJECT_BINARY_DIR}/${DEMO_NAME}.rc")
+    if(NOT EXISTS "${__rc_path}")
+        generate_win32_rc_file(
+            PATH "${__rc_path}"
+            VERSION "${PROJECT_VERSION}"
+            COMPANY "wangwenx190"
+            DESCRIPTION "FramelessHelper Demo Application: OpenGLWidget"
+            COPYRIGHT "MIT License"
+            PRODUCT "FramelessHelper Demo"
+            ICONS "../shared/example.ico"
+        )
+    endif()
+    set(__manifest_path "${PROJECT_BINARY_DIR}/${DEMO_NAME}.manifest")
+    if(NOT EXISTS "${__manifest_path}")
+        generate_win32_manifest_file(
+            PATH "${__manifest_path}"
+            ID "org.wangwenx190.demo.OpenGLWidget"
+            VERSION "${PROJECT_VERSION}"
+            VISTA_COMPAT
+            WIN7_COMPAT
+            WIN8_COMPAT
+            WIN8_1_COMPAT
+            WIN10_COMPAT
+            WIN11_COMPAT
+            XAML_ISLANDS_COMPAT
+            UTF8_CODEPAGE
+        )
+    endif()
+    target_sources(${DEMO_NAME} PRIVATE
+        "${__rc_path}"
+        "${__manifest_path}"
     )
 endif()
 
-target_compile_definitions(OpenGLWidget PRIVATE
-    QT_NO_CAST_FROM_ASCII
-    QT_NO_CAST_TO_ASCII
-    QT_NO_KEYWORDS
-    QT_USE_QSTRINGBUILDER
-    QT_DEPRECATED_WARNINGS
-    QT_DISABLE_DEPRECATED_BEFORE=0x060400
+target_link_libraries(${DEMO_NAME} PRIVATE
+    Qt${QT_VERSION_MAJOR}::Widgets
+    Qt${QT_VERSION_MAJOR}::OpenGL
+    FramelessHelper::Core
+    FramelessHelper::Widgets
 )
+
+if(TARGET Qt6::OpenGLWidgets)
+    target_link_libraries(${DEMO_NAME} PRIVATE
+        Qt6::OpenGLWidgets
+    )
+endif()
+
+setup_gui_app(
+    TARGETS ${DEMO_NAME}
+    BUNDLE_ID "org.wangwenx190.demo.OpenGLWidget"
+    BUNDLE_VERSION "1.0.0"
+    BUNDLE_VERSION_SHORT "1.0"
+)
+
+if(FRAMELESSHELPER_EXAMPLES_DEPLOYQT)
+    set(__extra_flags)
+    if(FRAMELESSHELPER_NO_INSTALL)
+        set(__extra_flags NO_INSTALL)
+    endif()
+    deploy_qt_runtime(TARGET ${DEMO_NAME} ${__extra_flags})
+endif()
+
+#dump_target_info(TARGETS ${DEMO_NAME})

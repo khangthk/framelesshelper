@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (C) 2022 by wangwenx190 (Yuhang Zhao)
+ * Copyright (C) 2021-2023 by wangwenx190 (Yuhang Zhao)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,20 +24,24 @@
 
 #pragma once
 
-#include "framelesshelperwidgets_global.h"
-#include <QtCore/qobject.h>
-#include <QtCore/qpointer.h>
-
-QT_BEGIN_NAMESPACE
-class QPaintEvent;
-QT_END_NAMESPACE
+#include <FramelessHelper/Widgets/framelesshelperwidgets_global.h>
+#include <QtGui/qscreen.h>
 
 FRAMELESSHELPER_BEGIN_NAMESPACE
 
+#if FRAMELESSHELPER_CONFIG(mica_material)
+class MicaMaterial;
+#endif
+#if FRAMELESSHELPER_CONFIG(border_painter)
+class WindowBorderPainter;
+#endif
+
 class FRAMELESSHELPER_WIDGETS_API WidgetsSharedHelper : public QObject
 {
-    Q_OBJECT
-    Q_DISABLE_COPY_MOVE(WidgetsSharedHelper)
+    FRAMELESSHELPER_QT_CLASS(WidgetsSharedHelper)
+#if FRAMELESSHELPER_CONFIG(mica_material)
+    Q_PROPERTY(bool micaEnabled READ isMicaEnabled WRITE setMicaEnabled NOTIFY micaEnabledChanged FINAL)
+#endif
 
 public:
     explicit WidgetsSharedHelper(QObject *parent = nullptr);
@@ -45,19 +49,51 @@ public:
 
     void setup(QWidget *widget);
 
+#if FRAMELESSHELPER_CONFIG(mica_material)
+    Q_NODISCARD bool isMicaEnabled() const;
+    void setMicaEnabled(const bool value);
+    Q_NODISCARD MicaMaterial *rawMicaMaterial() const;
+#endif
+#if FRAMELESSHELPER_CONFIG(border_painter)
+    Q_NODISCARD WindowBorderPainter *rawWindowBorder() const;
+#endif
+
 protected:
     Q_NODISCARD bool eventFilter(QObject *object, QEvent *event) override;
 
 private Q_SLOTS:
     void updateContentsMargins();
+    void handleScreenChanged(QScreen *screen);
 
 private:
-    void changeEventHandler(QEvent *event);
-    void paintEventHandler(QPaintEvent *event);
-    Q_NODISCARD bool shouldDrawFrameBorder() const;
+#if FRAMELESSHELPER_CONFIG(mica_material)
+    void repaintMica();
+#endif
+#if FRAMELESSHELPER_CONFIG(border_painter)
+    void repaintBorder();
+#endif
+    void emitCustomWindowStateSignals();
+
+Q_SIGNALS:
+#if FRAMELESSHELPER_CONFIG(mica_material)
+    void micaEnabledChanged();
+#endif
 
 private:
-    QPointer<QWidget> m_targetWidget = nullptr;
+    QPointer<QWidget> m_targetWidget;
+    QPointer<QScreen> m_screen;
+    qreal m_screenDpr = qreal(0);
+    QMetaObject::Connection m_screenDpiChangeConnection = {};
+    QMetaObject::Connection m_screenChangeConnection = {};
+#if FRAMELESSHELPER_CONFIG(mica_material)
+    bool m_micaEnabled = false;
+    MicaMaterial *m_micaMaterial = nullptr;
+    QMetaObject::Connection m_micaRedrawConnection = {};
+#endif
+#if FRAMELESSHELPER_CONFIG(border_painter)
+    WindowBorderPainter *m_borderPainter = nullptr;
+    QMetaObject::Connection m_borderRepaintConnection = {};
+#endif
 };
 
 FRAMELESSHELPER_END_NAMESPACE

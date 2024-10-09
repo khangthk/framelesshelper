@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (C) 2022 by wangwenx190 (Yuhang Zhao)
+ * Copyright (C) 2021-2023 by wangwenx190 (Yuhang Zhao)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,11 +24,28 @@
 
 #include "framelessmainwindow.h"
 #include "framelessmainwindow_p.h"
+
+#if FRAMELESSHELPER_CONFIG(window)
+
 #include "framelesswidgetshelper.h"
 #include "widgetssharedhelper_p.h"
-#include <utils.h>
+#include <FramelessHelper/Core/utils.h>
+#include <QtCore/qloggingcategory.h>
 
 FRAMELESSHELPER_BEGIN_NAMESPACE
+
+#if FRAMELESSHELPER_CONFIG(debug_output)
+[[maybe_unused]] static Q_LOGGING_CATEGORY(lcFramelessMainWindow, "wangwenx190.framelesshelper.widgets.framelessmainwindow")
+#  define INFO qCInfo(lcFramelessMainWindow)
+#  define DEBUG qCDebug(lcFramelessMainWindow)
+#  define WARNING qCWarning(lcFramelessMainWindow)
+#  define CRITICAL qCCritical(lcFramelessMainWindow)
+#else
+#  define INFO QT_NO_QDEBUG_MACRO()
+#  define DEBUG QT_NO_QDEBUG_MACRO()
+#  define WARNING QT_NO_QDEBUG_MACRO()
+#  define CRITICAL QT_NO_QDEBUG_MACRO()
+#endif
 
 using namespace Global;
 
@@ -39,7 +56,6 @@ FramelessMainWindowPrivate::FramelessMainWindowPrivate(FramelessMainWindow *q) :
         return;
     }
     q_ptr = q;
-    initialize();
 }
 
 FramelessMainWindowPrivate::~FramelessMainWindowPrivate() = default;
@@ -62,76 +78,47 @@ const FramelessMainWindowPrivate *FramelessMainWindowPrivate::get(const Frameles
     return pub->d_func();
 }
 
-void FramelessMainWindowPrivate::initialize()
-{
-    Q_Q(FramelessMainWindow);
-    FramelessWidgetsHelper::get(q)->extendsContentIntoTitleBar();
-    m_helper.reset(new WidgetsSharedHelper(this));
-    m_helper->setup(q);
-}
-
-bool FramelessMainWindowPrivate::isNormal() const
-{
-    Q_Q(const FramelessMainWindow);
-    return (Utils::windowStatesToWindowState(q->windowState()) == Qt::WindowNoState);
-}
-
-bool FramelessMainWindowPrivate::isZoomed() const
-{
-    Q_Q(const FramelessMainWindow);
-    return (q->isMaximized() || q->isFullScreen());
-}
-
-void FramelessMainWindowPrivate::toggleMaximized()
-{
-    Q_Q(FramelessMainWindow);
-    if (q->isMaximized()) {
-        q->showNormal();
-    } else {
-        q->showMaximized();
-    }
-}
-
-void FramelessMainWindowPrivate::toggleFullScreen()
-{
-    Q_Q(FramelessMainWindow);
-    if (q->isFullScreen()) {
-        q->setWindowState(m_savedWindowState);
-    } else {
-        m_savedWindowState = Utils::windowStatesToWindowState(q->windowState());
-        q->showFullScreen();
-    }
-}
-
 FramelessMainWindow::FramelessMainWindow(QWidget *parent, const Qt::WindowFlags flags)
-    : QMainWindow(parent, flags), d_ptr(new FramelessMainWindowPrivate(this))
+    : QMainWindow(parent, flags), d_ptr(std::make_unique<FramelessMainWindowPrivate>(this))
 {
+    FramelessWidgetsHelper::get(this)->extendsContentIntoTitleBar();
+    Q_D(FramelessMainWindow);
+    d->sharedHelper = new WidgetsSharedHelper(d);
+    d->sharedHelper->setup(this);
 }
 
 FramelessMainWindow::~FramelessMainWindow() = default;
 
 bool FramelessMainWindow::isNormal() const
 {
-    Q_D(const FramelessMainWindow);
-    return d->isNormal();
+    return (Utils::windowStatesToWindowState(windowState()) == Qt::WindowNoState);
 }
 
 bool FramelessMainWindow::isZoomed() const
 {
-    Q_D(const FramelessMainWindow);
-    return d->isZoomed();
+    return (isMaximized() || isFullScreen());
 }
 
 void FramelessMainWindow::toggleMaximized()
 {
-    Q_D(FramelessMainWindow);
-    d->toggleMaximized();
+    if (isMaximized()) {
+        showNormal();
+    } else {
+        showMaximized();
+    }
 }
 
 void FramelessMainWindow::toggleFullScreen()
 {
     Q_D(FramelessMainWindow);
-    d->toggleFullScreen();
+    if (isFullScreen()) {
+        setWindowState(d->savedWindowState);
+    } else {
+        d->savedWindowState = Utils::windowStatesToWindowState(windowState());
+        showFullScreen();
+    }
 }
 
 FRAMELESSHELPER_END_NAMESPACE
+
+#endif

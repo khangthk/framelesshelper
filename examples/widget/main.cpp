@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (C) 2022 by wangwenx190 (Yuhang Zhao)
+ * Copyright (C) 2021-2023 by wangwenx190 (Yuhang Zhao)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,20 +23,45 @@
  */
 
 #include <QtWidgets/qapplication.h>
+#include <FramelessHelper/Core/private/framelessconfig_p.h>
 #include "widget.h"
+#include "../shared/log.h"
 
 FRAMELESSHELPER_USE_NAMESPACE
 
+#define CREATE_WINDOW(Name) \
+    const auto Name = std::make_unique<Widget>(); \
+    Name->setObjectName(FRAMELESSHELPER_STRING_LITERAL(#Name)); \
+    Name->waitReady(); \
+    Name->show();
+
 int main(int argc, char *argv[])
 {
+    Log::setup(FRAMELESSHELPER_STRING_LITERAL("widget"));
+
     // Not necessary, but better call this function, before the construction
     // of any Q(Core|Gui)Application instances.
-    FramelessHelper::Core::initialize();
+    FramelessHelperWidgetsInitialize();
 
-    QApplication application(argc, argv);
+#if 0
+    if (!qEnvironmentVariableIsSet("QT_WIDGETS_RHI")) {
+        qputenv("QT_WIDGETS_RHI", FRAMELESSHELPER_BYTEARRAY_LITERAL("1"));
+    }
+#endif
 
-    Widget widget;
-    widget.show();
+    const auto application = std::make_unique<QApplication>(argc, argv);
+
+    // Must be called after QGuiApplication has been constructed, we are using
+    // some private functions from QPA which won't be available until there's
+    // a QGuiApplication instance.
+    FramelessHelperEnableThemeAware();
+
+    FramelessConfig::instance()->set(Global::Option::EnableBlurBehindWindow);
+    //FramelessConfig::instance()->set(Global::Option::DisableLazyInitializationForMicaMaterial);
+
+    CREATE_WINDOW(widget1)
+    CREATE_WINDOW(widget2)
+    CREATE_WINDOW(widget3)
 
     return QCoreApplication::exec();
 }
